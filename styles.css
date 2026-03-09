@@ -167,7 +167,7 @@ body {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 260px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -249,11 +249,13 @@ body {
 
 .content {
   padding: 0 24px 24px;
+  min-width: 0;
 }
 
 .content > .tab,
 .content-top-actions {
-  width: min(1400px, 100%);
+  width: 100%;
+  max-width: 1400px;
   margin-left: auto;
   margin-right: auto;
 }
@@ -896,6 +898,8 @@ textarea {
   background: var(--surface);
   overflow: auto;
   max-height: calc(100vh - 250px);
+  width: 100%;
+  min-width: 0;
 }
 
 .gantt {

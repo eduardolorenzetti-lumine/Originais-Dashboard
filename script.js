@@ -1175,10 +1175,12 @@ function renderGantt() {
     return;
   }
 
-  const leftWidth = 270;
-  const availableWidth = Math.max(container.clientWidth - leftWidth - 8, 320);
-  const monthWidth = Math.max(38, Math.floor(availableWidth / months.length));
-  const timelineWidth = months.length * monthWidth;
+  const containerWidth = Math.max(container.clientWidth, 320);
+  const leftWidth = containerWidth < 540 ? 160 : containerWidth < 800 ? 210 : 270;
+  const availableWidth = Math.max(containerWidth - leftWidth - 8, 140);
+  const minMonthWidth = containerWidth < 540 ? 12 : containerWidth < 800 ? 14 : 18;
+  const monthWidth = Math.max(minMonthWidth, Math.floor(availableWidth / months.length));
+  const timelineWidth = Math.max(months.length * monthWidth, availableWidth);
   container.style.setProperty("--month-width", `${monthWidth}px`);
   const currentMonthIso = (() => {
     const now = new Date();
@@ -1604,12 +1606,14 @@ function zoomTimeline(delta) {
   normalizeTimelineWindow();
   const current = getTimelineMonthsShown();
   const next = Math.max(6, Math.min(72, current + delta));
+  const container = document.getElementById("ganttContainer");
   state.timeline.monthsShown = next;
   state.timeline.end = addMonths(state.timeline.start, next - 1);
   document.getElementById("timelineStart").value = state.timeline.start;
   document.getElementById("timelineEnd").value = state.timeline.end;
   saveState();
   renderGantt();
+  if (container) container.scrollLeft = 0;
 }
 
 function decreaseTimelineWindow() {
@@ -2141,17 +2145,7 @@ function openProjectDialog(projectId = null) {
 
   const stageWrap = document.getElementById("projectStages");
   stageWrap.innerHTML = "";
-  const stages = project?.stages?.length
-    ? project.stages
-    : [
-        {
-          id: uid(),
-          stageId: state.settings.stages[0]?.id || "",
-          start: state.timeline.start,
-          end: state.timeline.start
-        }
-      ];
-
+  const stages = project?.stages?.length ? project.stages : [];
   stages.forEach((stage) => stageWrap.appendChild(buildStageRow(stage)));
   dialog.showModal();
 }
@@ -3421,8 +3415,8 @@ function getProjectSpentValue(project) {
   const spentCandidate = project?.spent;
   const budgetCandidate = project?.budget;
 
-  if (hasNumericValue(spentCandidate) && Number(spentCandidate) > 0) return Number(spentCandidate);
-  if (hasNumericValue(budgetCandidate) && Number(budgetCandidate) > 0) return Number(budgetCandidate);
+  if (hasNumericValue(budgetCandidate)) return Number(budgetCandidate);
+  if (hasNumericValue(spentCandidate)) return Number(spentCandidate);
   return null;
 }
 
