@@ -1034,7 +1034,7 @@ textarea {
   width: 0;
   border-left: 1px solid #ef4444;
   pointer-events: none;
-  z-index: 2;
+  z-index: 3;
 }
 
 .g-current-month-dot {
@@ -1046,6 +1046,7 @@ textarea {
   border-radius: 50%;
   background: #ef4444;
   box-shadow: 0 0 0 2px var(--surface);
+  z-index: 1;
 }
 
 .release-marker {
@@ -1092,7 +1093,7 @@ textarea {
   overflow: hidden;
   cursor: grab;
   user-select: none;
-  z-index: 3;
+  z-index: 4;
 }
 
 .release-stage-bar {
@@ -1114,7 +1115,7 @@ textarea {
   background: color-mix(in srgb, var(--success) 24%, var(--surface));
   border: 1px dashed var(--success);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.5);
-  z-index: 4;
+  z-index: 5;
 }
 
 .release-stage-bar .label {
@@ -1628,10 +1629,7 @@ dialog::backdrop {
 
 .stage-row [data-remove] {
   align-self: end;
-  height: 34px;
-  padding: 0 10px;
-  font-size: 0.72rem;
-  line-height: 1;
+  justify-self: end;
 }
 
 .stage-row input[readonly] {
@@ -1645,7 +1643,10 @@ dialog::backdrop {
 }
 
 .stage-remove-btn {
-  min-width: 72px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
 }
 
 .stage-start-grid {
