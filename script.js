@@ -65,6 +65,7 @@ const SUPABASE_STATE_TABLE = "app_state";
 const SUPABASE_DEFAULT_STATE_ID = "originais-main";
 const THEME_STORAGE_KEY = "lumine-theme";
 const THEME_VALUES = new Set(["dark", "light", "system"]);
+const MAX_AUDIT_LOG_ITEMS = 2000;
 
 let state = seedState();
 let currentTab = "dashboard";
@@ -114,6 +115,7 @@ let queuedSupabaseStateRaw = "";
 let hasShownSupabaseWarning = false;
 let hasShownSupabaseConfigWarning = false;
 let hasLoggedSupabaseTarget = false;
+let supabaseBaseState = null;
 let currentThemePreference = "system";
 let systemThemeMediaQuery = null;
 
@@ -180,6 +182,7 @@ async function init() {
   state = await hydrateStateFromSupabase(state);
   if (JSON.stringify(state) !== beforeHydrate) saveState({ skipSupabase: true });
   ensureAdminAccount();
+  supabaseBaseState = cloneForSync(state);
   applyPtBrLocaleToDateInputs(document);
   bindNavigation();
   bindGlobalActions();
@@ -508,6 +511,7 @@ async function refreshStateFromSupabaseNow() {
   if (JSON.stringify(merged) === before) return false;
   state = merged;
   ensureAdminAccount();
+  supabaseBaseState = cloneForSync(state);
   saveState({ skipSupabase: true });
   return true;
 }
@@ -2730,7 +2734,13 @@ function buildStateFromBase44Exports(fileMap, fallbackState) {
 
   const timeline = defaultTimelineWindow();
 
-  return { settings, projects, timeline, users: fallbackState.users || seedState().users };
+  return {
+    settings,
+    projects,
+    timeline,
+    users: fallbackState.users || seedState().users,
+    auditLogs: Array.isArray(fallbackState.auditLogs) ? fallbackState.auditLogs.slice(-MAX_AUDIT_LOG_ITEMS) : []
+  };
 }
 
 function parseCsv(text) {
@@ -3884,6 +3894,403 @@ function mergeUsersByEmail(primaryUsers = [], secondaryUsers = []) {
   return [...byEmail.values()];
 }
 
+function cloneForSync(value) {
+  try {
+    if (typeof structuredClone === "function") return structuredClone(value);
+  } catch {}
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return value;
+  }
+}
+
+function valueEquals(a, b) {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
+function mapById(list = []) {
+  const map = new Map();
+  if (!Array.isArray(list)) return map;
+  list.forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const id = String(item.id || "").trim();
+    if (!id) return;
+    map.set(id, item);
+  });
+  return map;
+}
+
+function normalizeStageForMerge(stage) {
+  if (!stage || typeof stage !== "object") return null;
+  const id = String(stage.id || "").trim();
+  if (!id) return null;
+  return {
+    id,
+    stageId: String(stage.stageId || "").trim(),
+    start: String(stage.start || "").trim(),
+    end: String(stage.end || "").trim(),
+    name: String(stage.name || "").trim(),
+    notes: String(stage.notes || "").trim()
+  };
+}
+
+function normalizeProjectForMerge(project) {
+  if (!project || typeof project !== "object") return null;
+  const id = String(project.id || "").trim();
+  if (!id) return null;
+  const budget = hasNumericValue(project.budget) ? Number(project.budget) : null;
+  const spent = hasNumericValue(project.spent) ? Number(project.spent) : null;
+  return {
+    ...project,
+    id,
+    code: String(project.code || "").trim(),
+    title: String(project.title || "").trim(),
+    year: Number.isFinite(Number(project.year)) ? Number(project.year) : null,
+    category: String(project.category || "").trim(),
+    productionType: String(project.productionType || "").trim(),
+    format: String(project.format || "").trim(),
+    nature: String(project.nature || "").trim(),
+    duration: String(project.duration || "").trim(),
+    status: String(project.status || "").trim(),
+    budget,
+    spent,
+    releaseDate: String(project.releaseDate || "").trim(),
+    notes: String(project.notes || "").trim(),
+    stages: (Array.isArray(project.stages) ? project.stages : [])
+      .map(normalizeStageForMerge)
+      .filter(Boolean)
+  };
+}
+
+function resolveValueByBase(baseValue, localValue, remoteValue) {
+  if (baseValue === undefined) {
+    if (localValue === undefined) return cloneForSync(remoteValue);
+    if (remoteValue === undefined) return cloneForSync(localValue);
+    return valueEquals(localValue, remoteValue) ? cloneForSync(localValue) : cloneForSync(localValue);
+  }
+  if (valueEquals(localValue, baseValue)) {
+    return remoteValue === undefined ? cloneForSync(localValue) : cloneForSync(remoteValue);
+  }
+  return cloneForSync(localValue);
+}
+
+function stageComparable(stage) {
+  const normalized = normalizeStageForMerge(stage);
+  if (!normalized) return null;
+  return normalized;
+}
+
+function projectComparable(project) {
+  const normalized = normalizeProjectForMerge(project);
+  if (!normalized) return null;
+  return {
+    ...normalized,
+    stages: [...normalized.stages].sort((a, b) => String(a.id).localeCompare(String(b.id)))
+  };
+}
+
+function mergeStageRecordWithBase(baseStage, localStage, remoteStage) {
+  const base = stageComparable(baseStage) || {};
+  const local = stageComparable(localStage) || {};
+  const remote = stageComparable(remoteStage) || {};
+  const merged = { ...remote };
+  const keys = new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(remote)]);
+  keys.delete("id");
+  keys.forEach((key) => {
+    merged[key] = resolveValueByBase(base[key], local[key], remote[key]);
+  });
+  merged.id = String(local.id || remote.id || base.id || uid());
+  return normalizeStageForMerge(merged);
+}
+
+function mergeStagesByBase(baseStages = [], localStages = [], remoteStages = []) {
+  const baseMap = mapById(baseStages.map(stageComparable).filter(Boolean));
+  const localMap = mapById(localStages.map(stageComparable).filter(Boolean));
+  const remoteMap = mapById(remoteStages.map(stageComparable).filter(Boolean));
+  const ids = new Set([...baseMap.keys(), ...localMap.keys(), ...remoteMap.keys()]);
+  const merged = [];
+
+  ids.forEach((id) => {
+    const base = baseMap.get(id) || null;
+    const local = localMap.get(id) || null;
+    const remote = remoteMap.get(id) || null;
+
+    if (base && !local) {
+      if (!remote || valueEquals(stageComparable(remote), stageComparable(base))) return;
+      merged.push(remote);
+      return;
+    }
+    if (!base && local && !remote) {
+      merged.push(local);
+      return;
+    }
+    if (!local && remote) {
+      merged.push(remote);
+      return;
+    }
+    if (local && !remote) {
+      if (base && valueEquals(stageComparable(local), stageComparable(base))) return;
+      merged.push(local);
+      return;
+    }
+    if (local && remote) {
+      const record = mergeStageRecordWithBase(base, local, remote);
+      if (record) merged.push(record);
+    }
+  });
+
+  return merged.sort((a, b) => {
+    const aStart = monthToIndex(a.start);
+    const bStart = monthToIndex(b.start);
+    if (Number.isFinite(aStart) && Number.isFinite(bStart) && aStart !== bStart) return aStart - bStart;
+    return String(a.id).localeCompare(String(b.id));
+  });
+}
+
+function mergeProjectRecordWithBase(baseProject, localProject, remoteProject) {
+  const base = projectComparable(baseProject) || {};
+  const local = projectComparable(localProject) || {};
+  const remote = projectComparable(remoteProject) || {};
+  const merged = { ...remote };
+  const keys = new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(remote)]);
+  keys.delete("id");
+  keys.delete("stages");
+  keys.forEach((key) => {
+    merged[key] = resolveValueByBase(base[key], local[key], remote[key]);
+  });
+  merged.id = String(local.id || remote.id || base.id || uid());
+  merged.stages = mergeStagesByBase(base.stages || [], local.stages || [], remote.stages || []);
+  return normalizeProjectForMerge(merged);
+}
+
+function mergeProjectsByBase(baseProjects = [], localProjects = [], remoteProjects = []) {
+  const baseMap = mapById(baseProjects.map(projectComparable).filter(Boolean));
+  const localMap = mapById(localProjects.map(projectComparable).filter(Boolean));
+  const remoteMap = mapById(remoteProjects.map(projectComparable).filter(Boolean));
+  const ids = new Set([...baseMap.keys(), ...localMap.keys(), ...remoteMap.keys()]);
+  const merged = [];
+
+  ids.forEach((id) => {
+    const base = baseMap.get(id) || null;
+    const local = localMap.get(id) || null;
+    const remote = remoteMap.get(id) || null;
+
+    if (base && !local) {
+      if (!remote || valueEquals(projectComparable(remote), projectComparable(base))) return;
+      merged.push(remote);
+      return;
+    }
+    if (!base && local && !remote) {
+      merged.push(local);
+      return;
+    }
+    if (!local && remote) {
+      merged.push(remote);
+      return;
+    }
+    if (local && !remote) {
+      if (base && valueEquals(projectComparable(local), projectComparable(base))) return;
+      merged.push(local);
+      return;
+    }
+    if (local && remote) {
+      const record = mergeProjectRecordWithBase(base, local, remote);
+      if (record) merged.push(record);
+    }
+  });
+
+  return merged.map((project) => ({
+    ...project,
+    releaseDate: inferReleaseDate(project)
+  }));
+}
+
+function mergeSectionByBase(baseSection, localSection, remoteSection) {
+  if (valueEquals(localSection, baseSection)) return cloneForSync(remoteSection);
+  return cloneForSync(localSection);
+}
+
+function createAuditEntry({
+  entityType,
+  entityId,
+  projectId = "",
+  action,
+  changes = {},
+  before = null,
+  after = null,
+  actor = null
+}) {
+  const now = new Date().toISOString();
+  return {
+    id: uid(),
+    at: now,
+    stateId: supabaseStateId,
+    action,
+    entityType,
+    entityId: String(entityId || "").trim(),
+    projectId: String(projectId || "").trim(),
+    byUserId: String(actor?.id || "").trim(),
+    byName: String(actor?.name || "").trim() || "Sistema",
+    byEmail: String(actor?.email || "").trim().toLowerCase(),
+    changes,
+    before,
+    after
+  };
+}
+
+function collectChangedFields(beforeObj, afterObj, ignoreKeys = new Set()) {
+  const before = beforeObj && typeof beforeObj === "object" ? beforeObj : {};
+  const after = afterObj && typeof afterObj === "object" ? afterObj : {};
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  const changes = {};
+  keys.forEach((key) => {
+    if (ignoreKeys.has(key)) return;
+    if (valueEquals(before[key], after[key])) return;
+    changes[key] = {
+      from: before[key] ?? null,
+      to: after[key] ?? null
+    };
+  });
+  return changes;
+}
+
+function buildProjectAuditEntries(baseProjects = [], localProjects = [], actor = null) {
+  const entries = [];
+  const baseMap = mapById(baseProjects.map(projectComparable).filter(Boolean));
+  const localMap = mapById(localProjects.map(projectComparable).filter(Boolean));
+  const projectIds = new Set([...baseMap.keys(), ...localMap.keys()]);
+
+  projectIds.forEach((projectId) => {
+    const baseProject = baseMap.get(projectId) || null;
+    const localProject = localMap.get(projectId) || null;
+
+    if (!baseProject && localProject) {
+      entries.push(
+        createAuditEntry({
+          entityType: "project",
+          entityId: localProject.id,
+          action: "create",
+          before: null,
+          after: { ...localProject, stages: undefined },
+          actor
+        })
+      );
+      return;
+    }
+
+    if (baseProject && !localProject) {
+      entries.push(
+        createAuditEntry({
+          entityType: "project",
+          entityId: baseProject.id,
+          action: "delete",
+          before: { ...baseProject, stages: undefined },
+          after: null,
+          actor
+        })
+      );
+      return;
+    }
+
+    if (!baseProject || !localProject) return;
+
+    const projectChanges = collectChangedFields(baseProject, localProject, new Set(["id", "stages"]));
+    if (Object.keys(projectChanges).length) {
+      entries.push(
+        createAuditEntry({
+          entityType: "project",
+          entityId: localProject.id,
+          action: "update",
+          changes: projectChanges,
+          before: { ...baseProject, stages: undefined },
+          after: { ...localProject, stages: undefined },
+          actor
+        })
+      );
+    }
+
+    const baseStages = mapById((baseProject.stages || []).map(stageComparable).filter(Boolean));
+    const localStages = mapById((localProject.stages || []).map(stageComparable).filter(Boolean));
+    const stageIds = new Set([...baseStages.keys(), ...localStages.keys()]);
+    stageIds.forEach((stageId) => {
+      const baseStage = baseStages.get(stageId) || null;
+      const localStage = localStages.get(stageId) || null;
+      if (!baseStage && localStage) {
+        entries.push(
+          createAuditEntry({
+            entityType: "project_stage",
+            entityId: localStage.id,
+            projectId,
+            action: "create",
+            before: null,
+            after: localStage,
+            actor
+          })
+        );
+        return;
+      }
+      if (baseStage && !localStage) {
+        entries.push(
+          createAuditEntry({
+            entityType: "project_stage",
+            entityId: baseStage.id,
+            projectId,
+            action: "delete",
+            before: baseStage,
+            after: null,
+            actor
+          })
+        );
+        return;
+      }
+      if (!baseStage || !localStage) return;
+      const stageChanges = collectChangedFields(baseStage, localStage, new Set(["id"]));
+      if (!Object.keys(stageChanges).length) return;
+      entries.push(
+        createAuditEntry({
+          entityType: "project_stage",
+          entityId: localStage.id,
+          projectId,
+          action: "update",
+          changes: stageChanges,
+          before: baseStage,
+          after: localStage,
+          actor
+        })
+      );
+    });
+  });
+
+  return entries;
+}
+
+function appendAuditLogs(existingLogs = [], newEntries = []) {
+  const baseLogs = Array.isArray(existingLogs) ? existingLogs : [];
+  const additions = Array.isArray(newEntries) ? newEntries.filter(Boolean) : [];
+  if (!additions.length) return baseLogs.slice(-MAX_AUDIT_LOG_ITEMS);
+  return [...baseLogs, ...additions].slice(-MAX_AUDIT_LOG_ITEMS);
+}
+
+function mergeConcurrentState(baseState, localState, remoteState, auditEntries = []) {
+  const base = mergeState(baseState || seedState());
+  const local = mergeState(localState || base);
+  const remote = mergeState(remoteState || base);
+  const mergedUsers = mergeUsersByEmail(
+    mergeSectionByBase(base.users || [], local.users || [], remote.users || []),
+    remote.users || []
+  );
+
+  return {
+    ...remote,
+    settings: mergeSectionByBase(base.settings || {}, local.settings || {}, remote.settings || {}),
+    users: mergedUsers,
+    projects: mergeProjectsByBase(base.projects || [], local.projects || [], remote.projects || []),
+    timeline: mergeSectionByBase(base.timeline || {}, local.timeline || {}, remote.timeline || {}),
+    auditLogs: appendAuditLogs(remote.auditLogs || [], auditEntries)
+  };
+}
+
 function mergeLocalAndRemoteState(localState, remoteState) {
   if (!remoteState) return localState;
   const localProjects = Array.isArray(localState?.projects) ? localState.projects : [];
@@ -3894,8 +4301,16 @@ function mergeLocalAndRemoteState(localState, remoteState) {
 
   return {
     ...primary,
-    users: mergeUsersByEmail(primary.users || [], secondary.users || [])
+    users: mergeUsersByEmail(primary.users || [], secondary.users || []),
+    auditLogs: appendAuditLogs(primary.auditLogs || [], secondary.auditLogs || [])
   };
+}
+
+async function fetchSupabaseStatePayload(client) {
+  if (client.mode === "rest") return supabaseRestFetchState(client);
+  const result = await client.from(SUPABASE_STATE_TABLE).select("state").eq("id", supabaseStateId).maybeSingle();
+  if (result.error) throw result.error;
+  return result.data;
 }
 
 async function hydrateStateFromSupabase(currentState) {
@@ -3903,21 +4318,7 @@ async function hydrateStateFromSupabase(currentState) {
   if (!client) return currentState;
 
   try {
-    let data = null;
-    if (client.mode === "rest") {
-      data = await supabaseRestFetchState(client);
-    } else {
-      const result = await client
-        .from(SUPABASE_STATE_TABLE)
-        .select("state")
-        .eq("id", supabaseStateId)
-        .maybeSingle();
-      if (result.error) {
-        console.warn("[Originais] Falha ao carregar estado do Supabase.", result.error.message || result.error);
-        return currentState;
-      }
-      data = result.data;
-    }
+    const data = await fetchSupabaseStatePayload(client);
     if (!data?.state) return currentState;
     const parsed = typeof data.state === "string" ? JSON.parse(data.state) : data.state;
     const remoteState = maybeRecoverProjectsFromBackup(mergeState(parsed));
@@ -3932,23 +4333,40 @@ async function persistStateToSupabase(stateRaw) {
   const client = getSupabaseClient();
   if (!client) return false;
   try {
+    const localState = maybeRecoverProjectsFromBackup(mergeState(typeof stateRaw === "string" ? JSON.parse(stateRaw) : stateRaw));
+    let remoteState = null;
+    try {
+      const remotePayload = await fetchSupabaseStatePayload(client);
+      if (remotePayload?.state) {
+        const parsedRemote = typeof remotePayload.state === "string" ? JSON.parse(remotePayload.state) : remotePayload.state;
+        remoteState = maybeRecoverProjectsFromBackup(mergeState(parsedRemote));
+      }
+    } catch (error) {
+      console.warn("[Originais] Não foi possível ler estado remoto antes de salvar. Seguindo com base local.", error?.message || error);
+    }
+
+    const baseState = supabaseBaseState ? cloneForSync(supabaseBaseState) : cloneForSync(localState);
+    const actor = getCurrentUser();
+    const auditEntries = buildProjectAuditEntries(baseState?.projects || [], localState?.projects || [], actor);
+    const payload = mergeConcurrentState(baseState, localState, remoteState || baseState, auditEntries);
+
     if (client.mode === "rest") {
-      await supabaseRestUpsertState(client, stateRaw);
-      return true;
+      await supabaseRestUpsertState(client, payload);
+    } else {
+      const { error } = await client.from(SUPABASE_STATE_TABLE).upsert(
+        {
+          id: supabaseStateId,
+          state: payload,
+          updated_at: new Date().toISOString()
+        },
+        { onConflict: "id" }
+      );
+      if (error) {
+        console.warn("[Originais] Falha ao persistir estado no Supabase.", error.message || error);
+        return false;
+      }
     }
-    const payload = typeof stateRaw === "string" ? JSON.parse(stateRaw) : stateRaw;
-    const { error } = await client.from(SUPABASE_STATE_TABLE).upsert(
-      {
-        id: supabaseStateId,
-        state: payload,
-        updated_at: new Date().toISOString()
-      },
-      { onConflict: "id" }
-    );
-    if (error) {
-      console.warn("[Originais] Falha ao persistir estado no Supabase.", error.message || error);
-      return false;
-    }
+    supabaseBaseState = cloneForSync(localState);
     return true;
   } catch (error) {
     console.warn("[Originais] Falha ao serializar/salvar estado no Supabase.", error);
@@ -4147,11 +4565,17 @@ function mergeState(parsed) {
         }))
         .filter((user) => user.name && user.email)
     : base.users;
+  const auditLogs = Array.isArray(parsed?.auditLogs)
+    ? parsed.auditLogs
+        .filter((entry) => entry && typeof entry === "object")
+        .slice(-MAX_AUDIT_LOG_ITEMS)
+    : [];
 
   return {
     settings: mergedSettings,
     projects,
     users,
+    auditLogs,
     timeline: {
       start: parsed?.timeline?.start || defaultTimelineWindow().start,
       end: parsed?.timeline?.end || defaultTimelineWindow().end,
@@ -4199,6 +4623,9 @@ function seedState() {
       ...project,
       releaseDate: inferReleaseDate(project)
     }));
+    cloned.auditLogs = Array.isArray(cloned.auditLogs)
+      ? cloned.auditLogs.filter((entry) => entry && typeof entry === "object").slice(-MAX_AUDIT_LOG_ITEMS)
+      : [];
     const defaults = buildDefaultItemColors(cloned.settings);
     cloned.settings.itemColors = mergeItemColors(defaults, cloned.settings.itemColors);
     return cloned;
@@ -4290,6 +4717,7 @@ function seedState() {
       }
     ],
     projects,
+    auditLogs: [],
     timeline: {
       ...defaultTimelineWindow()
     }

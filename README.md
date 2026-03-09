@@ -51,6 +51,20 @@ Abra `index.html` no navegador.
 ## Supabase (dados compartilhados entre usuários)
 Para que convites/login funcionem em qualquer navegador/dispositivo, configure um backend compartilhado.
 
+### Concorrência multiusuário (importante)
+O app usa sincronização com **merge em 3 vias** (base local + edição local + estado remoto) para evitar perda silenciosa quando dois usuários editam ao mesmo tempo.
+
+- Edições em `Projetos` e `Etapas` são mescladas por campo/registro.
+- Se dois usuários editarem campos diferentes do mesmo projeto, os dois valores são preservados.
+- As alterações são registradas em `state.auditLogs` (dentro do `app_state`) com:
+  - data/hora
+  - usuário (nome/e-mail)
+  - entidade (`project` / `project_stage`)
+  - ação (`create` / `update` / `delete`)
+  - campos alterados (`from` / `to`)
+
+Limite de retenção: últimos `2000` eventos.
+
 ### 1) Criar tabela no Supabase (SQL Editor)
 ```sql
 create table if not exists public.app_state (
