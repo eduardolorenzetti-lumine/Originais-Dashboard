@@ -1,5 +1,6 @@
 const STORAGE_KEY = "originais_lumine_state_v2";
 const SESSION_USER_KEY = `${STORAGE_KEY}_session_user`;
+const SESSION_TAB_KEY = `${STORAGE_KEY}_session_tab`;
 const PROJECTS_BACKUP_KEY = `${STORAGE_KEY}_projects_backup`;
 const IDB_NAME = "originais_lumine_db";
 const IDB_STORE = "kv";
@@ -118,6 +119,14 @@ let hasLoggedSupabaseTarget = false;
 let supabaseBaseState = null;
 let currentThemePreference = "system";
 let systemThemeMediaQuery = null;
+const ALLOWED_TABS = new Set(["dashboard", "cronograma", "projetos", "usuarios", "configuracoes"]);
+const FIELD_TO_SETTINGS_KEY = {
+  category: "categories",
+  format: "formats",
+  nature: "natures",
+  duration: "durations",
+  status: "statuses"
+};
 
 function normalizeThemePreference(value) {
   const normalized = String(value || "").trim().toLowerCase();
@@ -175,6 +184,25 @@ function initTheme() {
   applyThemePreference(getStoredThemePreference(), { persist: false });
 }
 
+function normalizeTabName(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ALLOWED_TABS.has(normalized) ? normalized : "dashboard";
+}
+
+function persistCurrentTab() {
+  try {
+    sessionStorage.setItem(SESSION_TAB_KEY, normalizeTabName(currentTab));
+  } catch (_) {}
+}
+
+function restoreCurrentTab() {
+  try {
+    currentTab = normalizeTabName(sessionStorage.getItem(SESSION_TAB_KEY) || "dashboard");
+  } catch (_) {
+    currentTab = "dashboard";
+  }
+}
+
 async function init() {
   state = loadState();
   const beforeHydrate = JSON.stringify(state);
@@ -189,6 +217,7 @@ async function init() {
   bindDialog();
   bindAuthActions();
   restoreSessionUser();
+  restoreCurrentTab();
   renderAll();
   applyAuthVisibility();
   queueSupabaseSync(JSON.stringify(state));
@@ -208,10 +237,11 @@ function openTab(tab) {
     return;
   }
   if (tab === "usuarios" && !canViewUsers()) tab = "dashboard";
-  currentTab = tab;
+  currentTab = normalizeTabName(tab);
+  persistCurrentTab();
   document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
-  document.getElementById(tab).classList.add("active");
-  document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab && !b.hidden));
+  document.getElementById(currentTab).classList.add("active");
+  document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === currentTab && !b.hidden));
   renderAll();
 }
 
@@ -476,6 +506,8 @@ function applyAuthVisibility() {
   if (timelineEnd) timelineEnd.disabled = !canEdit;
 
   if (user && currentTab === "usuarios" && !canSeeUsers) currentTab = "dashboard";
+  currentTab = normalizeTabName(currentTab);
+  persistCurrentTab();
   if (user) {
     document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
     document.getElementById(currentTab)?.classList.add("active");
@@ -888,12 +920,17 @@ function renderDashboard() {
     cardHtml("Gasto Médio por Projeto", money(avgSpent), "avg")
   ].join("");
 
+  const categoryPicker = (project) => getNormalizedProjectField(project, "category", { strict: true });
+  const formatPicker = (project) => getNormalizedProjectField(project, "format", { strict: true });
+  const naturePicker = (project) => getNormalizedProjectField(project, "nature", { strict: true });
+  const durationPicker = (project) => getNormalizedProjectField(project, "duration", { strict: true });
+
   renderBarChart(document.getElementById("chartByYear"), countByYearWithMissing(projects), "vertical", ["#f3ba00"]);
   renderBarChart(document.getElementById("chartByStatus"), countBy(projects, (p) => getProjectField(p, "status"), true), "vertical", ["#10b981", "#3b82f6", "#f59e0b", "#94a3b8"]);
-  renderBarChart(document.getElementById("chartByCategory"), countBy(projects, (p) => getProjectField(p, "category"), true), "vertical", ["#10b981", "#3b82f6", "#f59e0b", "#94a3b8"]);
-  renderBarChart(document.getElementById("chartByFormat"), countBy(projects, (p) => getProjectField(p, "format"), true), "vertical", ["#10b981", "#3b82f6", "#f59e0b"]);
-  renderBarChart(document.getElementById("chartByNature"), countBy(projects, (p) => getProjectField(p, "nature"), true), "vertical", ["#10b981", "#3b82f6", "#f59e0b"]);
-  renderBarChart(document.getElementById("chartByDuration"), countBy(projects, (p) => getProjectField(p, "duration"), true), "vertical", ["#10b981", "#3b82f6", "#f59e0b"]);
+  renderBarChart(document.getElementById("chartByCategory"), countBy(projects, categoryPicker, true), "vertical", ["#10b981", "#3b82f6", "#f59e0b", "#94a3b8"]);
+  renderBarChart(document.getElementById("chartByFormat"), countBy(projects, formatPicker, true), "vertical", ["#10b981", "#3b82f6", "#f59e0b"]);
+  renderBarChart(document.getElementById("chartByNature"), countBy(projects, naturePicker, true), "vertical", ["#10b981", "#3b82f6", "#f59e0b"]);
+  renderBarChart(document.getElementById("chartByDuration"), countBy(projects, durationPicker, true), "vertical", ["#10b981", "#3b82f6", "#f59e0b"]);
   renderBarChart(document.getElementById("chartAvgStage"), avgMonthsByStage(projects), "horizontal", ["#94a3b8", "#60a5fa", "#fcd34d", "#34d399", "#f472b6"]);
 }
 
@@ -931,10 +968,10 @@ function filteredDashboardProjects() {
       const yearKey = year ? String(year) : "__no_year";
       if (!selectedDashboardYears.has(yearKey)) return false;
     }
-    if (!matchesMultiFilter(getProjectField(p, "category"), selectedDashboardFilters.categories)) return false;
-    if (!matchesMultiFilter(getProjectField(p, "format"), selectedDashboardFilters.formats)) return false;
-    if (!matchesMultiFilter(getProjectField(p, "nature"), selectedDashboardFilters.natures)) return false;
-    if (!matchesMultiFilter(getProjectField(p, "duration"), selectedDashboardFilters.durations)) return false;
+    if (!matchesMultiFilter(getNormalizedProjectField(p, "category", { strict: true }), selectedDashboardFilters.categories)) return false;
+    if (!matchesMultiFilter(getNormalizedProjectField(p, "format", { strict: true }), selectedDashboardFilters.formats)) return false;
+    if (!matchesMultiFilter(getNormalizedProjectField(p, "nature", { strict: true }), selectedDashboardFilters.natures)) return false;
+    if (!matchesMultiFilter(getNormalizedProjectField(p, "duration", { strict: true }), selectedDashboardFilters.durations)) return false;
     if (!matchesProjectFilter(p.id, selectedDashboardFilters.projects)) return false;
     return true;
   });
@@ -945,28 +982,36 @@ function renderDashboardExtraFilters() {
   const toggle = document.getElementById("dashboardFiltersToggle");
   panel.hidden = !dashboardFiltersOpen;
   toggle.innerHTML = `Filtros <span class="filter-arrow">${dashboardFiltersOpen ? "▴" : "▾"}</span>`;
+  const categoryValues = uniq(state.settings.categories).filter(Boolean);
+  const formatValues = uniq(state.settings.formats).filter(Boolean);
+  const natureValues = uniq(state.settings.natures).filter(Boolean);
+  const durationValues = uniq(state.settings.durations).filter(Boolean);
+  sanitizeFilterSet(selectedDashboardFilters.categories, categoryValues);
+  sanitizeFilterSet(selectedDashboardFilters.formats, formatValues);
+  sanitizeFilterSet(selectedDashboardFilters.natures, natureValues);
+  sanitizeFilterSet(selectedDashboardFilters.durations, durationValues);
 
   renderDashboardFilterChips(
     document.getElementById("dashboardCategoryChips"),
-    uniq([...state.settings.categories, ...state.projects.map((p) => getProjectField(p, "category"))]).filter(Boolean),
+    categoryValues,
     selectedDashboardFilters.categories,
     "categories"
   );
   renderDashboardFilterChips(
     document.getElementById("dashboardFormatChips"),
-    uniq([...state.settings.formats, ...state.projects.map((p) => getProjectField(p, "format"))]).filter(Boolean),
+    formatValues,
     selectedDashboardFilters.formats,
     "formats"
   );
   renderDashboardFilterChips(
     document.getElementById("dashboardNatureChips"),
-    uniq([...state.settings.natures, ...state.projects.map((p) => getProjectField(p, "nature"))]).filter(Boolean),
+    natureValues,
     selectedDashboardFilters.natures,
     "natures"
   );
   renderDashboardFilterChips(
     document.getElementById("dashboardDurationChips"),
-    uniq([...state.settings.durations, ...state.projects.map((p) => getProjectField(p, "duration"))]).filter(Boolean),
+    durationValues,
     selectedDashboardFilters.durations,
     "durations"
   );
@@ -1145,6 +1190,35 @@ function getProjectField(project, field) {
   if (field === "duration") return pick("duration", "duracao");
   if (field === "status") return pick("status");
   return pick(field);
+}
+
+function normalizeValueBySettings(field, value, { strict = false } = {}) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const settingsKey = FIELD_TO_SETTINGS_KEY[field];
+  if (!settingsKey) return raw;
+  const options = Array.isArray(state?.settings?.[settingsKey]) ? state.settings[settingsKey].map((item) => String(item || "").trim()).filter(Boolean) : [];
+  if (!options.length) return strict ? "" : raw;
+  const normalizedRaw = normalizeSearchText(raw);
+  const exact = options.find((item) => normalizeSearchText(item) === normalizedRaw);
+  if (exact) return exact;
+
+  if (field === "category" && normalizedRaw.includes("incubad")) {
+    const incubado = options.find((item) => normalizeSearchText(item).includes("incubad"));
+    if (incubado) return incubado;
+  }
+  return strict ? "" : raw;
+}
+
+function getNormalizedProjectField(project, field, { strict = false } = {}) {
+  return normalizeValueBySettings(field, getProjectField(project, field), { strict });
+}
+
+function sanitizeFilterSet(selectedSet, allowedValues) {
+  const allowed = new Set((allowedValues || []).map((value) => String(value || "").trim()).filter(Boolean));
+  [...selectedSet].forEach((value) => {
+    if (!allowed.has(String(value || "").trim())) selectedSet.delete(value);
+  });
 }
 
 function getProjectYear(project) {
