@@ -1800,7 +1800,10 @@ function renderProjectsTable() {
         renderProjectsTable();
         return;
       }
+      // Mantem compatibilidade com dados legados que usam "spent" como campo de gasto.
+      // Ao editar/limpar gasto na tabela, os dois campos precisam refletir o mesmo valor.
       project.budget = parsed;
+      project.spent = parsed;
       saveState();
       renderProjectsTable();
       renderDashboard();
@@ -2178,7 +2181,8 @@ function collectProjectForm() {
     status: document.getElementById("projectStatus").value,
     budget: parsedBudget,
     releaseDate: normalizedReleaseDate,
-    spent: existingProject?.spent ?? null,
+    // Sincroniza com o campo legado para evitar reexibição do valor após limpar.
+    spent: parsedBudget,
     notes: document.getElementById("projectNotes").value.trim(),
     stages
   };
