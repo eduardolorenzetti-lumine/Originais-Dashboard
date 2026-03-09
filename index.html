@@ -480,16 +480,38 @@
       <label>Etapa
         <select data-field="stageId"></select>
       </label>
-      <label>Início
-        <input data-field="start" type="month" lang="pt-BR" />
-        <small class="month-pt-label" data-month-label="start"></small>
+      <label>Mês de início
+        <select data-field="startMonth"></select>
       </label>
-      <label>Fim
-        <input data-field="end" type="month" lang="pt-BR" />
-        <small class="month-pt-label" data-month-label="end"></small>
+      <label>Ano de início
+        <select data-field="startYear"></select>
       </label>
-      <button data-remove type="button" class="btn danger">Excluir</button>
+      <label>Duração (meses)
+        <input data-field="duration" type="number" min="1" step="1" value="1" />
+      </label>
+      <label>Término
+        <input data-field="endPreview" type="text" readonly />
+      </label>
+      <input data-field="start" type="hidden" />
+      <input data-field="end" type="hidden" />
+      <small class="month-pt-label" data-month-label="period"></small>
+      <button data-remove type="button" class="btn danger stage-remove-btn">Excluir</button>
     </div>
+  </template>
+
+  <template id="stageMonthOptionsTpl">
+    <option value="01">Jan</option>
+    <option value="02">Fev</option>
+    <option value="03">Mar</option>
+    <option value="04">Abr</option>
+    <option value="05">Mai</option>
+    <option value="06">Jun</option>
+    <option value="07">Jul</option>
+    <option value="08">Ago</option>
+    <option value="09">Set</option>
+    <option value="10">Out</option>
+    <option value="11">Nov</option>
+    <option value="12">Dez</option>
   </template>
 
   <dialog id="stageDialog">
@@ -497,21 +519,25 @@
       <h3 id="stageDialogTitle">Nova Etapa</h3>
       <input type="hidden" id="stageProjectId" />
       <input type="hidden" id="stageId" />
-      <div class="form-grid">
-        <label>Projeto
-          <input id="stageProjectLabel" disabled />
-        </label>
-        <label>Etapa
+      <input type="hidden" id="stageStart" />
+      <input type="hidden" id="stageEnd" />
+      <div class="form-grid stage-dialog-grid">
+        <label class="span-2">Etapa *
           <select id="stageTypeSelect"></select>
         </label>
-        <label>Início
-          <input type="month" id="stageStart" lang="pt-BR" required />
-          <small class="month-pt-label" id="stageStartLabel"></small>
+        <label class="span-2">Mês de início *
+          <div class="stage-start-grid">
+            <select id="stageStartMonth" required></select>
+            <select id="stageStartYear" required></select>
+          </div>
         </label>
-        <label>Fim
-          <input type="month" id="stageEnd" lang="pt-BR" required />
-          <small class="month-pt-label" id="stageEndLabel"></small>
+        <label>Duração (meses) *
+          <input type="number" id="stageDuration" min="1" step="1" required />
         </label>
+        <label>Término
+          <input type="text" id="stageEndPreview" readonly />
+        </label>
+        <small class="month-pt-label" id="stagePeriodLabel"></small>
       </div>
       <label>Observações
         <textarea id="stageNotes" rows="3"></textarea>

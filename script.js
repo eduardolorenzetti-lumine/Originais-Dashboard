@@ -625,8 +625,9 @@ function bindDialog() {
   const userForm = document.getElementById("userForm");
   const inviteDialog = document.getElementById("inviteDialog");
   const inviteForm = document.getElementById("inviteForm");
-  const stageStartInput = document.getElementById("stageStart");
-  const stageEndInput = document.getElementById("stageEnd");
+  const stageStartMonthInput = document.getElementById("stageStartMonth");
+  const stageStartYearInput = document.getElementById("stageStartYear");
+  const stageDurationInput = document.getElementById("stageDuration");
   const projectReleaseDateTextInput = document.getElementById("projectReleaseDateText");
   const projectReleaseDatePickerInput = document.getElementById("projectReleaseDatePicker");
   const projectReleaseDateOpenBtn = document.getElementById("projectReleaseDateOpen");
@@ -697,7 +698,7 @@ function bindDialog() {
     else projectReleaseDatePickerInput.click();
   });
 
-  [stageStartInput, stageEndInput].forEach((input) => {
+  [stageStartMonthInput, stageStartYearInput, stageDurationInput].forEach((input) => {
     if (!input) return;
     input.addEventListener("input", updateStageDialogMonthLabels);
     input.addEventListener("change", updateStageDialogMonthLabels);
@@ -747,6 +748,7 @@ function bindDialog() {
       alert("Perfil LEITOR possui apenas visualização.");
       return;
     }
+    updateStageDialogMonthLabels();
     const projectId = document.getElementById("stageProjectId").value;
     const stageId = document.getElementById("stageId").value;
     const stageTypeId = document.getElementById("stageTypeSelect").value;
@@ -1400,17 +1402,20 @@ function openStageDialog(projectId, stageId = null, forcedStart = null) {
   const stage = stageId ? project.stages.find((s) => s.id === stageId) : null;
   const dialog = document.getElementById("stageDialog");
   const stageSelect = document.getElementById("stageTypeSelect");
+  const startMonthSelect = document.getElementById("stageStartMonth");
+  const monthTemplate = document.getElementById("stageMonthOptionsTpl");
 
   stageSelect.innerHTML = state.settings.stages
     .map((st) => `<option value="${st.id}" ${st.id === (stage?.stageId || state.settings.stages[0]?.id) ? "selected" : ""}>${escapeHtml(st.name)}</option>`)
     .join("");
+  if (startMonthSelect && monthTemplate) startMonthSelect.innerHTML = monthTemplate.innerHTML;
 
   document.getElementById("stageDialogTitle").textContent = stage ? "Editar Etapa" : "Nova Etapa";
   document.getElementById("stageProjectId").value = project.id;
   document.getElementById("stageId").value = stage?.id || "";
-  document.getElementById("stageProjectLabel").value = `${project.code || ""} ${project.title}`.trim();
-  document.getElementById("stageStart").value = stage?.start || forcedStart || state.timeline.start;
-  document.getElementById("stageEnd").value = stage?.end || forcedStart || state.timeline.start;
+  const start = stage?.start || forcedStart || state.timeline.start;
+  const end = stage?.end || start;
+  setStageDialogRange(start, end);
   document.getElementById("stageNotes").value = stage?.notes || "";
   document.getElementById("stageDeleteBtn").style.visibility = stage ? "visible" : "hidden";
   updateStageDialogMonthLabels();
@@ -2143,7 +2148,7 @@ function openProjectDialog(projectId = null) {
           id: uid(),
           stageId: state.settings.stages[0]?.id || "",
           start: state.timeline.start,
-          end: addMonths(state.timeline.start, 2)
+          end: state.timeline.start
         }
       ];
 
@@ -2174,14 +2179,17 @@ function collectProjectForm() {
     alert("Ano inválido.");
     return null;
   }
+  const existingStagesById = new Map((existingProject?.stages || []).map((stage) => [stage.id, stage]));
   const stages = [...document.querySelectorAll("#projectStages .stage-row")]
     .map((row) => {
       const stageId = row.querySelector('[data-field="stageId"]').value;
       const start = row.querySelector('[data-field="start"]').value;
       const end = row.querySelector('[data-field="end"]').value;
       if (!stageId || !start || !end || monthToIndex(start) > monthToIndex(end)) return null;
+      const previous = existingStagesById.get(row.dataset.id) || {};
       return {
-        id: row.dataset.id,
+        ...previous,
+        id: row.dataset.id || previous.id || uid(),
         stageId,
         start,
         end
@@ -2219,10 +2227,18 @@ function buildStageRow(stage = null) {
     .map((st) => `<option value="${st.id}" ${st.id === (stage?.stageId || state.settings.stages[0]?.id) ? "selected" : ""}>${escapeHtml(st.name)}</option>`)
     .join("");
 
-  row.querySelector('[data-field="start"]').value = stage?.start || state.timeline.start;
-  row.querySelector('[data-field="end"]').value = stage?.end || addMonths(state.timeline.start, 1);
-  row.querySelectorAll('input[type="month"]').forEach((input) => {
-    input.setAttribute("lang", "pt-BR");
+  const startMonthSelect = row.querySelector('[data-field="startMonth"]');
+  const startYearSelect = row.querySelector('[data-field="startYear"]');
+  const durationInput = row.querySelector('[data-field="duration"]');
+  const monthTemplate = document.getElementById("stageMonthOptionsTpl");
+
+  if (startMonthSelect && monthTemplate) startMonthSelect.innerHTML = monthTemplate.innerHTML;
+  populateStageYearSelect(startYearSelect, stage?.start || state.timeline.start);
+  const defaultStart = stage?.start || state.timeline.start;
+  setStageRowRange(row, defaultStart, stage?.end || defaultStart);
+
+  [startMonthSelect, startYearSelect, durationInput].forEach((input) => {
+    if (!input) return;
     input.addEventListener("input", () => updateStageRowMonthLabels(row));
     input.addEventListener("change", () => updateStageRowMonthLabels(row));
   });
@@ -3187,23 +3203,131 @@ function monthLabelPtBrFull(isoMonth) {
   return `${labels[Number(m) - 1]}/${y}`;
 }
 
+function stageYearBounds() {
+  const nowYear = new Date().getFullYear();
+  return { min: 2017, max: nowYear + 10 };
+}
+
+function stageDurationFromRange(start, end) {
+  if (!isValidMonth(start) || !isValidMonth(end)) return 1;
+  const diff = monthToIndex(end) - monthToIndex(start) + 1;
+  if (!Number.isFinite(diff) || diff < 1) return 1;
+  return diff;
+}
+
+function sanitizeStageDuration(value) {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed) || parsed < 1) return 1;
+  return Math.min(parsed, 240);
+}
+
+function composeIsoMonth(yearValue, monthValue) {
+  const year = String(yearValue || "").trim();
+  const month = String(monthValue || "").trim().padStart(2, "0");
+  if (!/^\d{4}$/.test(year) || !/^(0[1-9]|1[0-2])$/.test(month)) return "";
+  return `${year}-${month}`;
+}
+
+function populateStageYearSelect(select, selectedMonthIso = "") {
+  if (!select) return;
+  const selectedYear = Number((selectedMonthIso || "").slice(0, 4));
+  const bounds = stageYearBounds();
+  const minYear = Number.isInteger(selectedYear) ? Math.min(bounds.min, selectedYear) : bounds.min;
+  const maxYear = Number.isInteger(selectedYear) ? Math.max(bounds.max, selectedYear) : bounds.max;
+
+  select.innerHTML = Array.from({ length: maxYear - minYear + 1 }, (_, index) => {
+    const year = minYear + index;
+    return `<option value="${year}">${year}</option>`;
+  }).join("");
+}
+
+function setStageRowRange(row, start, end) {
+  if (!row) return;
+  const startMonthSelect = row.querySelector('[data-field="startMonth"]');
+  const startYearSelect = row.querySelector('[data-field="startYear"]');
+  const durationInput = row.querySelector('[data-field="duration"]');
+  if (!startMonthSelect || !startYearSelect || !durationInput) return;
+
+  const normalizedStart = isValidMonth(start) ? start : state.timeline.start;
+  const normalizedEnd = isValidMonth(end) ? end : normalizedStart;
+
+  startMonthSelect.value = normalizedStart.slice(5, 7);
+  startYearSelect.value = normalizedStart.slice(0, 4);
+  durationInput.value = String(stageDurationFromRange(normalizedStart, normalizedEnd));
+  updateStageRowMonthLabels(row);
+}
+
+function setStageDialogRange(start, end) {
+  const monthSelect = document.getElementById("stageStartMonth");
+  const yearSelect = document.getElementById("stageStartYear");
+  const durationInput = document.getElementById("stageDuration");
+  if (!monthSelect || !yearSelect || !durationInput) return;
+
+  const normalizedStart = isValidMonth(start) ? start : state.timeline.start;
+  const normalizedEnd = isValidMonth(end) ? end : normalizedStart;
+
+  populateStageYearSelect(yearSelect, normalizedStart);
+  monthSelect.value = normalizedStart.slice(5, 7);
+  yearSelect.value = normalizedStart.slice(0, 4);
+  durationInput.value = String(stageDurationFromRange(normalizedStart, normalizedEnd));
+  updateStageDialogMonthLabels();
+}
+
 function updateStageRowMonthLabels(row) {
   if (!row) return;
-  const startInput = row.querySelector('[data-field="start"]');
-  const endInput = row.querySelector('[data-field="end"]');
-  const startLabel = row.querySelector('[data-month-label="start"]');
-  const endLabel = row.querySelector('[data-month-label="end"]');
-  if (startLabel) startLabel.textContent = monthLabelPtBrFull(startInput?.value) || "Selecione mês/ano";
-  if (endLabel) endLabel.textContent = monthLabelPtBrFull(endInput?.value) || "Selecione mês/ano";
+  const startMonthSelect = row.querySelector('[data-field="startMonth"]');
+  const startYearSelect = row.querySelector('[data-field="startYear"]');
+  const durationInput = row.querySelector('[data-field="duration"]');
+  const startHidden = row.querySelector('[data-field="start"]');
+  const endHidden = row.querySelector('[data-field="end"]');
+  const endPreview = row.querySelector('[data-field="endPreview"]');
+  const periodLabel = row.querySelector('[data-month-label="period"]');
+  if (!startMonthSelect || !startYearSelect || !durationInput) return;
+
+  const start = composeIsoMonth(startYearSelect.value, startMonthSelect.value);
+  const duration = sanitizeStageDuration(durationInput.value);
+  durationInput.value = String(duration);
+  if (!isValidMonth(start)) {
+    if (startHidden) startHidden.value = "";
+    if (endHidden) endHidden.value = "";
+    if (endPreview) endPreview.value = "";
+    if (periodLabel) periodLabel.textContent = "Selecione mês/ano";
+    return;
+  }
+
+  const end = addMonths(start, duration - 1);
+  if (startHidden) startHidden.value = start;
+  if (endHidden) endHidden.value = end;
+  if (endPreview) endPreview.value = monthHoverLabel(end);
+  if (periodLabel) periodLabel.textContent = `${monthLabelPtBrFull(start)} → ${monthLabelPtBrFull(end)} (${duration} ${duration === 1 ? "mês" : "meses"})`;
 }
 
 function updateStageDialogMonthLabels() {
-  const startInput = document.getElementById("stageStart");
-  const endInput = document.getElementById("stageEnd");
-  const startLabel = document.getElementById("stageStartLabel");
-  const endLabel = document.getElementById("stageEndLabel");
-  if (startLabel) startLabel.textContent = monthLabelPtBrFull(startInput?.value) || "Selecione mês/ano";
-  if (endLabel) endLabel.textContent = monthLabelPtBrFull(endInput?.value) || "Selecione mês/ano";
+  const monthSelect = document.getElementById("stageStartMonth");
+  const yearSelect = document.getElementById("stageStartYear");
+  const durationInput = document.getElementById("stageDuration");
+  const startHidden = document.getElementById("stageStart");
+  const endHidden = document.getElementById("stageEnd");
+  const endPreview = document.getElementById("stageEndPreview");
+  const periodLabel = document.getElementById("stagePeriodLabel");
+  if (!monthSelect || !yearSelect || !durationInput) return;
+
+  const start = composeIsoMonth(yearSelect.value, monthSelect.value);
+  const duration = sanitizeStageDuration(durationInput.value);
+  durationInput.value = String(duration);
+  if (!isValidMonth(start)) {
+    if (startHidden) startHidden.value = "";
+    if (endHidden) endHidden.value = "";
+    if (endPreview) endPreview.value = "";
+    if (periodLabel) periodLabel.textContent = "Selecione mês/ano";
+    return;
+  }
+
+  const end = addMonths(start, duration - 1);
+  if (startHidden) startHidden.value = start;
+  if (endHidden) endHidden.value = end;
+  if (endPreview) endPreview.value = monthHoverLabel(end);
+  if (periodLabel) periodLabel.textContent = `${monthLabelPtBrFull(start)} → ${monthLabelPtBrFull(end)} (${duration} ${duration === 1 ? "mês" : "meses"})`;
 }
 
 function timelineRangeLabel(start, end) {
