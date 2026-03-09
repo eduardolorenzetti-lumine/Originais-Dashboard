@@ -899,6 +899,7 @@ textarea {
 }
 
 .gantt {
+  position: relative;
   width: fit-content;
   min-width: 100%;
 }
@@ -1024,6 +1025,27 @@ textarea {
   background: var(--year-separator);
   pointer-events: none;
   z-index: 1;
+}
+
+.g-current-month-marker {
+  position: absolute;
+  top: var(--g-current-top, 44px);
+  bottom: 0;
+  width: 0;
+  border-left: 1px solid #ef4444;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.g-current-month-dot {
+  position: absolute;
+  top: -7px;
+  left: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px var(--surface);
 }
 
 .release-marker {

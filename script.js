@@ -882,7 +882,7 @@ function renderDashboard() {
     cardHtml("Gasto Médio por Projeto", money(avgSpent), "avg")
   ].join("");
 
-  renderBarChart(document.getElementById("chartByYear"), countBy(projects, (p) => getProjectYear(p), true), "vertical", ["#f3ba00"]);
+  renderBarChart(document.getElementById("chartByYear"), countByYearWithMissing(projects), "vertical", ["#f3ba00"]);
   renderBarChart(document.getElementById("chartByStatus"), countBy(projects, (p) => getProjectField(p, "status"), true), "vertical", ["#10b981", "#3b82f6", "#f59e0b", "#94a3b8"]);
   renderBarChart(document.getElementById("chartByCategory"), countBy(projects, (p) => getProjectField(p, "category"), true), "vertical", ["#10b981", "#3b82f6", "#f59e0b", "#94a3b8"]);
   renderBarChart(document.getElementById("chartByFormat"), countBy(projects, (p) => getProjectField(p, "format"), true), "vertical", ["#10b981", "#3b82f6", "#f59e0b"]);
@@ -893,12 +893,13 @@ function renderDashboard() {
 
 function renderDashboardYearChips() {
   const years = [...new Set(state.projects.map((p) => getProjectYear(p)).filter((y) => y > 0))].sort((a, b) => a - b);
+  const hasMissingYear = state.projects.some((project) => !getProjectYear(project));
   const allActive = selectedDashboardYears.size === 0;
-  const chips = ["Todos", ...years];
+  const chips = ["Todos", ...years, ...(hasMissingYear ? ["SEM ANO"] : [])];
   document.getElementById("yearChips").innerHTML = chips
     .map((y) => {
-      const active = y === "Todos" ? allActive : selectedDashboardYears.has(String(y));
-      const value = y === "Todos" ? "__all" : String(y);
+      const value = y === "Todos" ? "__all" : y === "SEM ANO" ? "__no_year" : String(y);
+      const active = y === "Todos" ? allActive : selectedDashboardYears.has(value);
       return `<button class="chip ${active ? "active" : ""}" data-year="${value}">${y}</button>`;
     })
     .join("");
@@ -918,9 +919,12 @@ function renderDashboardYearChips() {
 }
 
 function filteredDashboardProjects() {
-  const withYear = state.projects.filter((p) => getProjectYear(p) > 0);
-  return withYear.filter((p) => {
-    if (selectedDashboardYears.size && !selectedDashboardYears.has(String(getProjectYear(p)))) return false;
+  return state.projects.filter((p) => {
+    if (selectedDashboardYears.size) {
+      const year = getProjectYear(p);
+      const yearKey = year ? String(year) : "__no_year";
+      if (!selectedDashboardYears.has(yearKey)) return false;
+    }
     if (!matchesMultiFilter(getProjectField(p, "category"), selectedDashboardFilters.categories)) return false;
     if (!matchesMultiFilter(getProjectField(p, "format"), selectedDashboardFilters.formats)) return false;
     if (!matchesMultiFilter(getProjectField(p, "nature"), selectedDashboardFilters.natures)) return false;
@@ -1174,6 +1178,12 @@ function renderGantt() {
   const monthWidth = Math.max(38, Math.floor(availableWidth / months.length));
   const timelineWidth = months.length * monthWidth;
   container.style.setProperty("--month-width", `${monthWidth}px`);
+  const currentMonthIso = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  })();
+  const currentMarkerIndex = monthToIndex(currentMonthIso) - monthToIndex(state.timeline.start);
+  const hasCurrentMarker = currentMarkerIndex >= 0 && currentMarkerIndex < months.length;
 
   let html = `<div class="gantt" style="min-width:${leftWidth + timelineWidth}px">`;
   html += `<div class="gantt-head" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
@@ -1236,8 +1246,19 @@ function renderGantt() {
     html += "</div></div>";
   });
 
+  if (hasCurrentMarker) {
+    const markerLeft = leftWidth + currentMarkerIndex * monthWidth + monthWidth / 2;
+    html += `<div class="g-current-month-marker" style="left:${markerLeft}px" title="Mês atual: ${escapeHtml(monthLabel(currentMonthIso))}">
+      <span class="g-current-month-dot" aria-hidden="true"></span>
+    </div>`;
+  }
+
   html += "</div>";
   container.innerHTML = html;
+
+  const ganttEl = container.querySelector(".gantt");
+  const headEl = container.querySelector(".gantt-head");
+  if (ganttEl && headEl) ganttEl.style.setProperty("--g-current-top", `${headEl.offsetHeight}px`);
 
   if (!editable) return;
 
@@ -3060,6 +3081,28 @@ function countBy(projects, picker, ignoreEmpty = false) {
     acc[finalKey] = (acc[finalKey] || 0) + 1;
     return acc;
   }, {});
+}
+
+function countByYearWithMissing(projects) {
+  const counts = {};
+  projects.forEach((project) => {
+    const year = getProjectYear(project);
+    const key = year ? String(year) : "SEM ANO";
+    counts[key] = (counts[key] || 0) + 1;
+  });
+
+  const ordered = {};
+  Object.keys(counts)
+    .sort((a, b) => {
+      if (a === "SEM ANO" && b === "SEM ANO") return 0;
+      if (a === "SEM ANO") return 1;
+      if (b === "SEM ANO") return -1;
+      return Number(a) - Number(b);
+    })
+    .forEach((key) => {
+      ordered[key] = counts[key];
+    });
+  return ordered;
 }
 
 function avgMonthsByStage(projects) {
