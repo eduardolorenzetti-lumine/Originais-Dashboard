@@ -1248,14 +1248,6 @@ function setFilterToggleButton(button, isOpen) {
   button.innerHTML = `Filtros <span class="filter-arrow${isOpen ? " up" : ""}" aria-hidden="true"></span>`;
 }
 
-function isIncubatedStatusValue(statusValue) {
-  return normalizeSearchText(statusValue).includes("incubad");
-}
-
-function isIncubatedProject(project) {
-  return isIncubatedStatusValue(getProjectField(project, "status"));
-}
-
 function getUsedStageIdsFromProject(project) {
   return new Set((project?.stages || []).map((stage) => String(stage?.stageId || "").trim()).filter(Boolean));
 }
@@ -1382,10 +1374,8 @@ function renderGantt() {
   html += "</div>";
 
   list.forEach((project) => {
-    try {
-      const incubated = isIncubatedProject(project);
-      html += `<div class="gantt-row ${incubated ? "is-incubated" : ""}" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
-      html += `<div class="g-left">
+    html += `<div class="gantt-row" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
+    html += `<div class="g-left">
       ${
         editable
           ? `<button type="button" class="g-open" data-open-project="${project.id}">`
@@ -1397,52 +1387,49 @@ function renderGantt() {
       ${editable ? `<button type="button" class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
     </div>`;
 
-      html += `<div class="g-line" data-line-project="${project.id}">`;
-      months.forEach((m, idx) => {
-        if (idx > 0 && String(m).endsWith("-01")) {
-          html += `<div class="g-year-divider" style="left: calc(${idx} * var(--month-width));" aria-hidden="true"></div>`;
-        }
-      });
-      const stages = Array.isArray(project?.stages) ? project.stages : [];
-      stages.forEach((st) => {
-        if (!st || !isValidMonth(st.start) || !isValidMonth(st.end)) return;
-        const startIndex = monthToIndex(st.start);
-        const endIndex = monthToIndex(st.end);
-        if (!Number.isFinite(startIndex) || !Number.isFinite(endIndex)) return;
-        const start = startIndex - monthToIndex(state.timeline.start);
-        const end = endIndex - monthToIndex(state.timeline.start);
-        if (end < 0 || start >= months.length) return;
-        const visStart = Math.max(0, start);
-        const visEnd = Math.min(months.length - 1, end);
-        const width = visEnd - visStart + 1;
-        if (!Number.isFinite(width) || width <= 0) return;
-        const stageDef = state.settings.stages.find((s) => s.id === st.stageId);
-        const color = stageDef?.color || "#cbd5e1";
-        const stageLabel = stageDef?.name || st.name || "Etapa";
-        const stageTitle = `${stageLabel}: ${monthHoverLabel(st.start)} - ${monthHoverLabel(st.end)}`;
-        const selected = selectedStageRef && selectedStageRef.projectId === project.id && selectedStageRef.stageId === st.id;
+    html += `<div class="g-line" data-line-project="${project.id}">`;
+    months.forEach((m, idx) => {
+      if (idx > 0 && String(m).endsWith("-01")) {
+        html += `<div class="g-year-divider" style="left: calc(${idx} * var(--month-width));" aria-hidden="true"></div>`;
+      }
+    });
+    const stages = Array.isArray(project?.stages) ? project.stages : [];
+    stages.forEach((st) => {
+      if (!st || !isValidMonth(st.start) || !isValidMonth(st.end)) return;
+      const startIndex = monthToIndex(st.start);
+      const endIndex = monthToIndex(st.end);
+      if (!Number.isFinite(startIndex) || !Number.isFinite(endIndex)) return;
+      const start = startIndex - monthToIndex(state.timeline.start);
+      const end = endIndex - monthToIndex(state.timeline.start);
+      if (end < 0 || start >= months.length) return;
+      const visStart = Math.max(0, start);
+      const visEnd = Math.min(months.length - 1, end);
+      const width = visEnd - visStart + 1;
+      if (!Number.isFinite(width) || width <= 0) return;
+      const stageDef = state.settings.stages.find((s) => s.id === st.stageId);
+      const color = stageDef?.color || "#cbd5e1";
+      const stageLabel = stageDef?.name || st.name || "Etapa";
+      const stageTitle = `${stageLabel}: ${monthHoverLabel(st.start)} - ${monthHoverLabel(st.end)}`;
+      const selected = selectedStageRef && selectedStageRef.projectId === project.id && selectedStageRef.stageId === st.id;
 
-        html += `<div class="stage-bar ${selected ? "selected" : ""}" style="left: calc(${visStart} * var(--month-width)); width: calc(${width} * var(--month-width) - 2px); background:${color}" data-project="${project.id}" data-stage="${st.id}" title="${escapeHtml(stageTitle)}">
+      html += `<div class="stage-bar ${selected ? "selected" : ""}" style="left: calc(${visStart} * var(--month-width)); width: calc(${width} * var(--month-width) - 2px); background:${color}" data-project="${project.id}" data-stage="${st.id}" title="${escapeHtml(stageTitle)}">
         <span class="label">${escapeHtml(stageLabel)}</span>
         <span class="stage-handle left" data-resize="left"></span>
         <span class="stage-handle right" data-resize="right"></span>
       </div>`;
-      });
+    });
 
-      const releaseMarker = getReleaseMarkerData(project.releaseDate, state.timeline.start, state.timeline.end);
-      if (releaseMarker) {
-        html += `<div class="release-stage-bar" style="left: calc(${releaseMarker.offsetMonths} * var(--month-width)); width: calc(1 * var(--month-width) - 2px);" data-release-project="${project.id}" title="Lançamento: ${escapeHtml(
-          releaseMarker.label
-        )}">
+    const releaseMarker = getReleaseMarkerData(project.releaseDate, state.timeline.start, state.timeline.end);
+    if (releaseMarker) {
+      html += `<div class="release-stage-bar" style="left: calc(${releaseMarker.offsetMonths} * var(--month-width)); width: calc(1 * var(--month-width) - 2px);" data-release-project="${project.id}" title="Lançamento: ${escapeHtml(
+        releaseMarker.label
+      )}">
         <span class="label">LAN</span>
         <span class="stage-handle left"></span>
         <span class="stage-handle right"></span>
       </div>`;
-      }
-      html += "</div></div>";
-    } catch (error) {
-      console.warn("[Originais] Falha ao renderizar linha do cronograma.", project?.id, error);
     }
+    html += "</div></div>";
   });
 
   if (hasCurrentMarker) {

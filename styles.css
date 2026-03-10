@@ -1095,14 +1095,6 @@ textarea {
   pointer-events: auto;
 }
 
-.gantt-row.is-incubated .g-left {
-  background: color-mix(in srgb, var(--surface-2) 86%, #9ca3af 14%);
-}
-
-.gantt-row.is-incubated .g-line {
-  background-color: color-mix(in srgb, var(--surface-2) 92%, #9ca3af 8%);
-}
-
 .g-line {
   border-bottom: 1px solid var(--line);
   min-height: 48px;
