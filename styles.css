@@ -498,21 +498,18 @@ textarea {
 }
 
 .dashboard-top-controls {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
   gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
+  align-items: start;
   margin-bottom: 10px;
 }
 
 .dashboard-top-controls .year-inline {
   min-width: 0;
-  flex: 1 1 auto;
 }
 
 .dashboard-top-controls .filter-toggle-btn {
-  margin-left: auto;
+  width: fit-content;
 }
 
 .dashboard-filters {
@@ -1042,14 +1039,18 @@ textarea {
 }
 
 .g-code {
-  font-size: 0.65rem;
-  color: color-mix(in srgb, var(--text) 78%, #334155 22%);
+  font-size: 0.62rem;
+  color: color-mix(in srgb, var(--text) 72%, #334155 28%);
   white-space: nowrap;
-  background: color-mix(in srgb, var(--surface-2) 86%, #9ca3af 14%);
-  border: 1px solid color-mix(in srgb, var(--line) 72%, #9ca3af 28%);
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-weight: 600;
+  background: color-mix(in srgb, var(--surface-2) 95%, #ffffff 5%);
+  border: 1px solid color-mix(in srgb, var(--line) 86%, #cbd5e1 14%);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-weight: 650;
+  font-family: "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-variant-numeric: slashed-zero tabular-nums;
+  font-feature-settings: "zero" 1, "tnum" 1;
+  letter-spacing: 0.01em;
 }
 
 .g-open {
@@ -1061,7 +1062,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: calc(100% - 68px);
+  max-width: calc(100% - 36px);
 }
 
 .g-open:hover .g-title,
@@ -1070,6 +1071,7 @@ textarea {
 }
 
 .g-add-stage {
+  margin-left: auto;
   width: 24px;
   height: 24px;
   flex-shrink: 0;
@@ -1078,37 +1080,6 @@ textarea {
   background: color-mix(in srgb, var(--accent) 24%, var(--surface));
   color: var(--text);
   font-weight: 700;
-}
-
-.g-actions {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.g-view-stage {
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--surface-2) 84%, var(--surface));
-  color: var(--muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  cursor: pointer;
-}
-
-.g-view-stage svg {
-  width: 14px;
-  height: 14px;
-  fill: currentColor;
-}
-
-.g-view-stage:hover {
-  color: var(--text);
 }
 
 .gantt-row.is-incubated .g-left {
