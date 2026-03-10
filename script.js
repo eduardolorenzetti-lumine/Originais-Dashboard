@@ -73,6 +73,7 @@ let currentTab = "dashboard";
 let selectedDashboardYears = new Set();
 let dashboardFiltersOpen = false;
 let selectedDashboardFilters = {
+  statuses: new Set(),
   categories: new Set(),
   formats: new Set(),
   natures: new Set(),
@@ -82,6 +83,7 @@ let selectedDashboardFilters = {
 let selectedGanttYears = new Set();
 let ganttFiltersOpen = false;
 let selectedGanttFilters = {
+  statuses: new Set(),
   categories: new Set(),
   formats: new Set(),
   natures: new Set(),
@@ -91,6 +93,7 @@ let selectedGanttFilters = {
 let selectedProjectYears = new Set();
 let projectFiltersOpen = false;
 let selectedProjectFilters = {
+  statuses: new Set(),
   categories: new Set(),
   formats: new Set(),
   natures: new Set(),
@@ -120,6 +123,8 @@ let supabaseBaseState = null;
 let currentThemePreference = "system";
 let systemThemeMediaQuery = null;
 let pendingGanttMeasureRetry = false;
+let ganttDelegatedBound = false;
+let ganttGhostActiveLine = null;
 const ALLOWED_TABS = new Set(["dashboard", "cronograma", "projetos", "usuarios", "configuracoes"]);
 const FIELD_TO_SETTINGS_KEY = {
   category: "categories",
@@ -332,6 +337,186 @@ function bindGlobalActions() {
     projectFiltersOpen = !projectFiltersOpen;
     renderProjectsTools();
     renderProjectsTable();
+  });
+}
+
+function bindGanttDelegatedInteractions() {
+  if (ganttDelegatedBound) return;
+  const container = document.getElementById("ganttContainer");
+  if (!container) return;
+  ganttDelegatedBound = true;
+  window.__originaisDebugGantt = () => ({
+    role: getCurrentUserRole(),
+    canEdit: canEditContent(),
+    lines: document.querySelectorAll("#ganttContainer .g-line").length,
+    openButtons: document.querySelectorAll("#ganttContainer [data-open-project]").length,
+    delegatedBound: ganttDelegatedBound,
+    lastEvent: window.__originaisLastGanttEvent || "",
+    lastError: window.__originaisLastGanttError || ""
+  });
+
+  const findFromEventPath = (event, selector) => {
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    for (const node of path) {
+      if (node instanceof Element && node.matches(selector)) return node;
+    }
+    return null;
+  };
+
+  container.addEventListener(
+    "click",
+    (event) => {
+      const openBtn = findFromEventPath(event, "[data-open-project]");
+      if (openBtn instanceof HTMLElement) {
+        window.__originaisLastGanttEvent = "open-project-before";
+        window.__originaisLastGanttError = "";
+        event.preventDefault();
+        event.stopPropagation();
+        try {
+          openProjectDialog(openBtn.dataset.openProject);
+          window.__originaisLastGanttEvent = "open-project-after";
+        } catch (error) {
+          window.__originaisLastGanttEvent = "open-project-error";
+          window.__originaisLastGanttError = String(error?.message || error);
+          alert(`Erro ao abrir projeto: ${window.__originaisLastGanttError}`);
+        }
+        return;
+      }
+
+      const addBtn = findFromEventPath(event, "[data-add-stage]");
+      if (addBtn instanceof HTMLElement) {
+        window.__originaisLastGanttEvent = "add-stage-click";
+        window.__originaisLastGanttError = "";
+        event.preventDefault();
+        event.stopPropagation();
+        if (!canEditContent()) {
+          alert("Perfil LEITOR possui apenas visualização.");
+          return;
+        }
+        try {
+          openStageDialog(addBtn.dataset.addStage);
+        } catch (error) {
+          window.__originaisLastGanttEvent = "add-stage-error";
+          window.__originaisLastGanttError = String(error?.message || error);
+          alert(`Erro ao abrir nova etapa: ${window.__originaisLastGanttError}`);
+        }
+        return;
+      }
+
+      const stageBar = findFromEventPath(event, ".stage-bar");
+      if (stageBar instanceof HTMLElement) {
+        window.__originaisLastGanttEvent = "stage-bar-click";
+        window.__originaisLastGanttError = "";
+        event.stopPropagation();
+        if (Date.now() < suppressLineClickUntil) return;
+        if (!canEditContent()) {
+          alert("Perfil LEITOR possui apenas visualização.");
+          return;
+        }
+        try {
+          openStageDialog(stageBar.dataset.project, stageBar.dataset.stage);
+        } catch (error) {
+          window.__originaisLastGanttEvent = "stage-bar-error";
+          window.__originaisLastGanttError = String(error?.message || error);
+          alert(`Erro ao abrir etapa: ${window.__originaisLastGanttError}`);
+        }
+        return;
+      }
+
+      const line = findFromEventPath(event, ".g-line");
+      if (!(line instanceof HTMLElement)) return;
+      window.__originaisLastGanttEvent = "line-click";
+      window.__originaisLastGanttError = "";
+      if (Date.now() < suppressLineClickUntil) return;
+      if (findFromEventPath(event, ".stage-bar, .release-stage-bar")) return;
+      if (!canEditContent()) {
+        alert("Perfil LEITOR possui apenas visualização.");
+        return;
+      }
+      const projectId = line.dataset.lineProject;
+      const project = state.projects.find((item) => item.id === projectId);
+      if (!project) return;
+      const idx = monthIndexFromLinePointer(line, event);
+      if (idx == null) return;
+      const month = addMonths(state.timeline.start, idx);
+      try {
+        openStageDialog(projectId, null, month);
+      } catch (error) {
+        window.__originaisLastGanttEvent = "line-click-error";
+        window.__originaisLastGanttError = String(error?.message || error);
+        alert(`Erro ao clicar na timeline: ${window.__originaisLastGanttError}`);
+      }
+    },
+    true
+  );
+
+  container.addEventListener(
+    "dblclick",
+    (event) => {
+      const releaseBar = findFromEventPath(event, ".release-stage-bar");
+      if (!(releaseBar instanceof HTMLElement)) return;
+      window.__originaisLastGanttEvent = "release-dblclick";
+      window.__originaisLastGanttError = "";
+      event.stopPropagation();
+      if (!canEditContent()) {
+        alert("Perfil LEITOR possui apenas visualização.");
+        return;
+      }
+      try {
+        openReleaseDateEditor(releaseBar.dataset.releaseProject);
+      } catch (error) {
+        window.__originaisLastGanttEvent = "release-dblclick-error";
+        window.__originaisLastGanttError = String(error?.message || error);
+        alert(`Erro ao editar lançamento: ${window.__originaisLastGanttError}`);
+      }
+    },
+    true
+  );
+
+  container.addEventListener(
+    "mousedown",
+    (event) => {
+      if (event.button !== 0) return;
+      if (!canEditContent()) return;
+
+      const releaseBar = findFromEventPath(event, ".release-stage-bar");
+      if (releaseBar instanceof HTMLElement) {
+        window.__originaisLastGanttEvent = "release-mousedown";
+        event.stopPropagation();
+        startReleaseDrag(event, releaseBar);
+        return;
+      }
+
+      const stageBar = findFromEventPath(event, ".stage-bar");
+      if (stageBar instanceof HTMLElement) {
+        window.__originaisLastGanttEvent = "stage-mousedown";
+        const handle = findFromEventPath(event, "[data-resize]");
+        startStageDrag(event, stageBar, handle?.dataset.resize || "move");
+      }
+    },
+    true
+  );
+
+  container.addEventListener(
+    "mousemove",
+    (event) => {
+      const line = findFromEventPath(event, ".g-line");
+      if (!(line instanceof HTMLElement)) {
+        if (ganttGhostActiveLine) removeStageGhost(ganttGhostActiveLine);
+        ganttGhostActiveLine = null;
+        return;
+      }
+      window.__originaisLastGanttEvent = "line-mousemove";
+      if (ganttGhostActiveLine && ganttGhostActiveLine !== line) removeStageGhost(ganttGhostActiveLine);
+      ganttGhostActiveLine = line;
+      renderStageGhost(line, event);
+    },
+    true
+  );
+
+  container.addEventListener("mouseleave", () => {
+    if (ganttGhostActiveLine) removeStageGhost(ganttGhostActiveLine);
+    ganttGhostActiveLine = null;
   });
 }
 
@@ -709,7 +894,8 @@ function bindDialog() {
       updateProjectStageAddButtonState();
       return;
     }
-    stageWrap.appendChild(buildStageRow(null, { preferredStageId: nextStageId }));
+    const preferredStart = getNextStageStartFromStageRows(stageWrap);
+    stageWrap.appendChild(buildStageRow(null, { preferredStageId: nextStageId, preferredStart }));
     updateProjectStageAddButtonState();
   });
   projectStatusSelect?.addEventListener("change", updateProjectStageAddButtonState);
@@ -989,6 +1175,7 @@ function filteredDashboardProjects() {
       const yearKey = year ? String(year) : "__no_year";
       if (!selectedDashboardYears.has(yearKey)) return false;
     }
+    if (!matchesMultiFilter(getNormalizedProjectField(p, "status", { strict: true }), selectedDashboardFilters.statuses)) return false;
     if (!matchesMultiFilter(getNormalizedProjectField(p, "category", { strict: true }), selectedDashboardFilters.categories)) return false;
     if (!matchesMultiFilter(getNormalizedProjectField(p, "format", { strict: true }), selectedDashboardFilters.formats)) return false;
     if (!matchesMultiFilter(getNormalizedProjectField(p, "nature", { strict: true }), selectedDashboardFilters.natures)) return false;
@@ -1003,15 +1190,23 @@ function renderDashboardExtraFilters() {
   const toggle = document.getElementById("dashboardFiltersToggle");
   panel.hidden = !dashboardFiltersOpen;
   setFilterToggleButton(toggle, dashboardFiltersOpen);
+  const statusValues = uniq(state.settings.statuses).filter(Boolean);
   const categoryValues = uniq(state.settings.categories).filter(Boolean);
   const formatValues = uniq(state.settings.formats).filter(Boolean);
   const natureValues = uniq(state.settings.natures).filter(Boolean);
   const durationValues = uniq(state.settings.durations).filter(Boolean);
+  sanitizeFilterSet(selectedDashboardFilters.statuses, statusValues);
   sanitizeFilterSet(selectedDashboardFilters.categories, categoryValues);
   sanitizeFilterSet(selectedDashboardFilters.formats, formatValues);
   sanitizeFilterSet(selectedDashboardFilters.natures, natureValues);
   sanitizeFilterSet(selectedDashboardFilters.durations, durationValues);
 
+  renderDashboardFilterChips(
+    document.getElementById("dashboardStatusChips"),
+    statusValues,
+    selectedDashboardFilters.statuses,
+    "statuses"
+  );
   renderDashboardFilterChips(
     document.getElementById("dashboardCategoryChips"),
     categoryValues,
@@ -1261,6 +1456,16 @@ function getUsedStageIdsFromStageRows(stageWrap) {
   );
 }
 
+function getNextStageStartFromStageRows(stageWrap) {
+  if (!stageWrap) return "";
+  const stageEnds = [...stageWrap.querySelectorAll(".stage-row [data-field='end']")]
+    .map((el) => String(el.value || "").trim())
+    .filter((value) => isValidMonth(value));
+  if (!stageEnds.length) return "";
+  const latestEnd = stageEnds.reduce((latest, value) => (monthToIndex(value) > monthToIndex(latest) ? value : latest), stageEnds[0]);
+  return addMonths(latestEnd, 1);
+}
+
 function getNextAvailableStageIdByUsedSet(usedStageIds) {
   for (const stage of state.settings.stages || []) {
     const stageId = String(stage?.id || "").trim();
@@ -1393,13 +1598,19 @@ function renderGantt() {
         html += `<div class="g-year-divider" style="left: calc(${idx} * var(--month-width));" aria-hidden="true"></div>`;
       }
     });
-    project.stages.forEach((st) => {
-      const start = monthToIndex(st.start) - monthToIndex(state.timeline.start);
-      const end = monthToIndex(st.end) - monthToIndex(state.timeline.start);
+    const stages = Array.isArray(project?.stages) ? project.stages : [];
+    stages.forEach((st) => {
+      if (!st || !isValidMonth(st.start) || !isValidMonth(st.end)) return;
+      const startIndex = monthToIndex(st.start);
+      const endIndex = monthToIndex(st.end);
+      if (!Number.isFinite(startIndex) || !Number.isFinite(endIndex)) return;
+      const start = startIndex - monthToIndex(state.timeline.start);
+      const end = endIndex - monthToIndex(state.timeline.start);
       if (end < 0 || start >= months.length) return;
       const visStart = Math.max(0, start);
       const visEnd = Math.min(months.length - 1, end);
       const width = visEnd - visStart + 1;
+      if (!Number.isFinite(width) || width <= 0) return;
       const stageDef = state.settings.stages.find((s) => s.id === st.stageId);
       const color = stageDef?.color || "#cbd5e1";
       const stageLabel = stageDef?.name || st.name || "Etapa";
@@ -1545,6 +1756,13 @@ function renderGanttExtraFilters() {
   setFilterToggleButton(toggle, ganttFiltersOpen);
 
   renderDashboardFilterChips(
+    document.getElementById("ganttStatusChips"),
+    uniq([...state.settings.statuses, ...state.projects.map((p) => getProjectField(p, "status"))]).filter(Boolean),
+    selectedGanttFilters.statuses,
+    "statuses",
+    () => renderGantt()
+  );
+  renderDashboardFilterChips(
     document.getElementById("ganttCategoryChips"),
     uniq([...state.settings.categories, ...state.projects.map((p) => getProjectField(p, "category"))]).filter(Boolean),
     selectedGanttFilters.categories,
@@ -1578,6 +1796,7 @@ function renderGanttExtraFilters() {
 function filteredGanttProjects() {
   return state.projects.filter((p) => {
     if (selectedGanttYears.size && !selectedGanttYears.has(String(getProjectYear(p)))) return false;
+    if (!matchesMultiFilter(getProjectField(p, "status"), selectedGanttFilters.statuses)) return false;
     if (!matchesMultiFilter(getProjectField(p, "category"), selectedGanttFilters.categories)) return false;
     if (!matchesMultiFilter(getProjectField(p, "format"), selectedGanttFilters.formats)) return false;
     if (!matchesMultiFilter(getProjectField(p, "nature"), selectedGanttFilters.natures)) return false;
@@ -1857,6 +2076,16 @@ function renderProjectsTools() {
   });
 
   renderDashboardFilterChips(
+    document.getElementById("projectStatusChips"),
+    uniq([...state.settings.statuses, ...state.projects.map((p) => getProjectField(p, "status"))]).filter(Boolean),
+    selectedProjectFilters.statuses,
+    "statuses",
+    () => {
+      renderProjectsTools();
+      renderProjectsTable();
+    }
+  );
+  renderDashboardFilterChips(
     document.getElementById("projectCategoryChips"),
     uniq([...state.settings.categories, ...state.projects.map((p) => getProjectField(p, "category"))]).filter(Boolean),
     selectedProjectFilters.categories,
@@ -1910,6 +2139,7 @@ function renderProjectsTable() {
     const hit = !query || String(p.title || "").toLowerCase().includes(query) || String(p.code || "").toLowerCase().includes(query);
     if (!hit) return false;
     if (selectedProjectYears.size && !selectedProjectYears.has(String(getProjectYear(p)))) return false;
+    if (!matchesMultiFilter(getProjectField(p, "status"), selectedProjectFilters.statuses)) return false;
     if (!matchesMultiFilter(getProjectField(p, "category"), selectedProjectFilters.categories)) return false;
     if (!matchesMultiFilter(getProjectField(p, "format"), selectedProjectFilters.formats)) return false;
     if (!matchesMultiFilter(getProjectField(p, "nature"), selectedProjectFilters.natures)) return false;
@@ -2417,6 +2647,7 @@ function buildStageRow(stage = null, options = {}) {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   })();
+  const preferredStart = isValidMonth(options?.preferredStart) ? options.preferredStart : "";
 
   const select = row.querySelector('[data-field="stageId"]');
   select.innerHTML = state.settings.stages
@@ -2430,7 +2661,7 @@ function buildStageRow(stage = null, options = {}) {
   const monthTemplate = document.getElementById("stageMonthOptionsTpl");
 
   if (startMonthSelect && monthTemplate) startMonthSelect.innerHTML = monthTemplate.innerHTML;
-  const defaultStart = stage?.start || currentIsoMonth;
+  const defaultStart = stage?.start || preferredStart || currentIsoMonth;
   populateStageYearSelect(startYearSelect, defaultStart);
   setStageRowRange(row, defaultStart, stage?.end || defaultStart);
 
@@ -3435,12 +3666,14 @@ function monthLabelParts(isoMonth) {
 }
 
 function monthHoverLabel(isoMonth) {
+  if (!isValidMonth(isoMonth)) return "";
   const labels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
   const [y, m] = isoMonth.split("-");
   return `${labels[Number(m) - 1]}/${y}`;
 }
 
 function monthLabelLong(isoMonth) {
+  if (!isValidMonth(isoMonth)) return "";
   const labels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
   const [y, m] = isoMonth.split("-");
   return `${labels[Number(m) - 1]} ${y}`;
