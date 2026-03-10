@@ -350,7 +350,8 @@ function bindGanttDelegatedInteractions() {
     lines: document.querySelectorAll("#ganttContainer .g-line").length,
     openButtons: document.querySelectorAll("#ganttContainer [data-open-project]").length,
     delegatedBound: ganttDelegatedBound,
-    lastEvent: window.__originaisLastGanttEvent || ""
+    lastEvent: window.__originaisLastGanttEvent || "",
+    lastError: window.__originaisLastGanttError || ""
   });
 
   const findFromEventPath = (event, selector) => {
@@ -366,42 +367,65 @@ function bindGanttDelegatedInteractions() {
     (event) => {
       const openBtn = findFromEventPath(event, "[data-open-project]");
       if (openBtn instanceof HTMLElement) {
-        window.__originaisLastGanttEvent = "open-project-click";
+        window.__originaisLastGanttEvent = "open-project-before";
+        window.__originaisLastGanttError = "";
         event.preventDefault();
         event.stopPropagation();
-        openProjectDialog(openBtn.dataset.openProject);
+        try {
+          openProjectDialog(openBtn.dataset.openProject);
+          window.__originaisLastGanttEvent = "open-project-after";
+        } catch (error) {
+          window.__originaisLastGanttEvent = "open-project-error";
+          window.__originaisLastGanttError = String(error?.message || error);
+          alert(`Erro ao abrir projeto: ${window.__originaisLastGanttError}`);
+        }
         return;
       }
 
       const addBtn = findFromEventPath(event, "[data-add-stage]");
       if (addBtn instanceof HTMLElement) {
         window.__originaisLastGanttEvent = "add-stage-click";
+        window.__originaisLastGanttError = "";
         event.preventDefault();
         event.stopPropagation();
         if (!canEditContent()) {
           alert("Perfil LEITOR possui apenas visualização.");
           return;
         }
-        openStageDialog(addBtn.dataset.addStage);
+        try {
+          openStageDialog(addBtn.dataset.addStage);
+        } catch (error) {
+          window.__originaisLastGanttEvent = "add-stage-error";
+          window.__originaisLastGanttError = String(error?.message || error);
+          alert(`Erro ao abrir nova etapa: ${window.__originaisLastGanttError}`);
+        }
         return;
       }
 
       const stageBar = findFromEventPath(event, ".stage-bar");
       if (stageBar instanceof HTMLElement) {
         window.__originaisLastGanttEvent = "stage-bar-click";
+        window.__originaisLastGanttError = "";
         event.stopPropagation();
         if (Date.now() < suppressLineClickUntil) return;
         if (!canEditContent()) {
           alert("Perfil LEITOR possui apenas visualização.");
           return;
         }
-        openStageDialog(stageBar.dataset.project, stageBar.dataset.stage);
+        try {
+          openStageDialog(stageBar.dataset.project, stageBar.dataset.stage);
+        } catch (error) {
+          window.__originaisLastGanttEvent = "stage-bar-error";
+          window.__originaisLastGanttError = String(error?.message || error);
+          alert(`Erro ao abrir etapa: ${window.__originaisLastGanttError}`);
+        }
         return;
       }
 
       const line = findFromEventPath(event, ".g-line");
       if (!(line instanceof HTMLElement)) return;
       window.__originaisLastGanttEvent = "line-click";
+      window.__originaisLastGanttError = "";
       if (Date.now() < suppressLineClickUntil) return;
       if (findFromEventPath(event, ".stage-bar, .release-stage-bar")) return;
       if (!canEditContent()) {
@@ -414,7 +438,13 @@ function bindGanttDelegatedInteractions() {
       const idx = monthIndexFromLinePointer(line, event);
       if (idx == null) return;
       const month = addMonths(state.timeline.start, idx);
-      openStageDialog(projectId, null, month);
+      try {
+        openStageDialog(projectId, null, month);
+      } catch (error) {
+        window.__originaisLastGanttEvent = "line-click-error";
+        window.__originaisLastGanttError = String(error?.message || error);
+        alert(`Erro ao clicar na timeline: ${window.__originaisLastGanttError}`);
+      }
     },
     true
   );
@@ -425,12 +455,19 @@ function bindGanttDelegatedInteractions() {
       const releaseBar = findFromEventPath(event, ".release-stage-bar");
       if (!(releaseBar instanceof HTMLElement)) return;
       window.__originaisLastGanttEvent = "release-dblclick";
+      window.__originaisLastGanttError = "";
       event.stopPropagation();
       if (!canEditContent()) {
         alert("Perfil LEITOR possui apenas visualização.");
         return;
       }
-      openReleaseDateEditor(releaseBar.dataset.releaseProject);
+      try {
+        openReleaseDateEditor(releaseBar.dataset.releaseProject);
+      } catch (error) {
+        window.__originaisLastGanttEvent = "release-dblclick-error";
+        window.__originaisLastGanttError = String(error?.message || error);
+        alert(`Erro ao editar lançamento: ${window.__originaisLastGanttError}`);
+      }
     },
     true
   );
