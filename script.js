@@ -120,6 +120,8 @@ let supabaseBaseState = null;
 let currentThemePreference = "system";
 let systemThemeMediaQuery = null;
 let pendingGanttMeasureRetry = false;
+let ganttInteractionsBound = false;
+let lastGanttGhostLine = null;
 const ALLOWED_TABS = new Set(["dashboard", "cronograma", "projetos", "usuarios", "configuracoes"]);
 const FIELD_TO_SETTINGS_KEY = {
   category: "categories",
@@ -247,6 +249,8 @@ function openTab(tab) {
 }
 
 function bindGlobalActions() {
+  bindGanttInteractions();
+
   document.getElementById("btnNewProject").addEventListener("click", () => {
     if (!canEditContent()) {
       alert("Perfil LEITOR possui apenas visualização.");
@@ -332,6 +336,101 @@ function bindGlobalActions() {
     projectFiltersOpen = !projectFiltersOpen;
     renderProjectsTools();
     renderProjectsTable();
+  });
+}
+
+function bindGanttInteractions() {
+  const container = document.getElementById("ganttContainer");
+  if (!container || ganttInteractionsBound) return;
+  ganttInteractionsBound = true;
+
+  container.addEventListener("click", (event) => {
+    if (!canEditContent()) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+
+    const openBtn = target.closest("[data-open-project]");
+    if (openBtn instanceof HTMLElement) {
+      event.preventDefault();
+      event.stopPropagation();
+      openProjectDialog(openBtn.dataset.openProject);
+      return;
+    }
+
+    const addBtn = target.closest("[data-add-stage]");
+    if (addBtn instanceof HTMLElement) {
+      event.preventDefault();
+      event.stopPropagation();
+      openStageDialog(addBtn.dataset.addStage);
+      return;
+    }
+
+    const stageBar = target.closest(".stage-bar");
+    if (stageBar instanceof HTMLElement) {
+      event.stopPropagation();
+      if (Date.now() < suppressLineClickUntil) return;
+      openStageDialog(stageBar.dataset.project, stageBar.dataset.stage);
+      return;
+    }
+
+    const line = target.closest(".g-line");
+    if (!(line instanceof HTMLElement)) return;
+    if (Date.now() < suppressLineClickUntil) return;
+    if (target.closest(".stage-bar, .release-stage-bar")) return;
+    const projectId = line.dataset.lineProject;
+    const project = state.projects.find((item) => item.id === projectId);
+    if (!project) return;
+    const idx = monthIndexFromLinePointer(line, event);
+    if (idx == null) return;
+    const month = addMonths(state.timeline.start, idx);
+    openStageDialog(projectId, null, month);
+  });
+
+  container.addEventListener("dblclick", (event) => {
+    if (!canEditContent()) return;
+    const target = event.target instanceof Element ? event.target : null;
+    const releaseBar = target?.closest(".release-stage-bar");
+    if (!(releaseBar instanceof HTMLElement)) return;
+    event.stopPropagation();
+    openReleaseDateEditor(releaseBar.dataset.releaseProject);
+  });
+
+  container.addEventListener("mousedown", (event) => {
+    if (!canEditContent()) return;
+    if (event.button !== 0) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+
+    const releaseBar = target.closest(".release-stage-bar");
+    if (releaseBar instanceof HTMLElement) {
+      event.stopPropagation();
+      startReleaseDrag(event, releaseBar);
+      return;
+    }
+
+    const stageBar = target.closest(".stage-bar");
+    if (stageBar instanceof HTMLElement) {
+      const handle = target.closest("[data-resize]");
+      startStageDrag(event, stageBar, handle?.dataset.resize || "move");
+    }
+  });
+
+  container.addEventListener("mousemove", (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const line = target?.closest(".g-line");
+    if (!(line instanceof HTMLElement)) {
+      if (lastGanttGhostLine) removeStageGhost(lastGanttGhostLine);
+      lastGanttGhostLine = null;
+      return;
+    }
+    if (lastGanttGhostLine && lastGanttGhostLine !== line) removeStageGhost(lastGanttGhostLine);
+    lastGanttGhostLine = line;
+    renderStageGhost(line, event);
+  });
+
+  container.addEventListener("mouseleave", () => {
+    if (lastGanttGhostLine) removeStageGhost(lastGanttGhostLine);
+    lastGanttGhostLine = null;
   });
 }
 
@@ -1459,86 +1558,10 @@ function renderGantt() {
   const headEl = container.querySelector(".gantt-head");
   if (ganttEl && headEl) ganttEl.style.setProperty("--g-current-top", `${headEl.offsetHeight}px`);
 
-  if (!editable) {
-    container.onclick = null;
-    container.onmousedown = null;
-    container.ondblclick = null;
-    return;
+  if (!editable && lastGanttGhostLine) {
+    removeStageGhost(lastGanttGhostLine);
+    lastGanttGhostLine = null;
   }
-  container.onclick = (event) => {
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target) return;
-
-    const openBtn = target.closest("[data-open-project]");
-    if (openBtn instanceof HTMLElement) {
-      event.preventDefault();
-      event.stopPropagation();
-      openProjectDialog(openBtn.dataset.openProject);
-      return;
-    }
-
-    const addBtn = target.closest("[data-add-stage]");
-    if (addBtn instanceof HTMLElement) {
-      event.preventDefault();
-      event.stopPropagation();
-      openStageDialog(addBtn.dataset.addStage);
-      return;
-    }
-
-    const stageBar = target.closest(".stage-bar");
-    if (stageBar instanceof HTMLElement) {
-      event.stopPropagation();
-      if (Date.now() < suppressLineClickUntil) return;
-      openStageDialog(stageBar.dataset.project, stageBar.dataset.stage);
-      return;
-    }
-
-    const line = target.closest(".g-line");
-    if (!(line instanceof HTMLElement)) return;
-    if (Date.now() < suppressLineClickUntil) return;
-    if (target.closest(".stage-bar, .release-stage-bar")) return;
-    const projectId = line.dataset.lineProject;
-    const project = state.projects.find((item) => item.id === projectId);
-    if (!project) return;
-    const idx = monthIndexFromLinePointer(line, event);
-    if (idx == null) return;
-    const month = addMonths(state.timeline.start, idx);
-    openStageDialog(projectId, null, month);
-  };
-
-  container.ondblclick = (event) => {
-    const target = event.target instanceof Element ? event.target : null;
-    const releaseBar = target?.closest(".release-stage-bar");
-    if (!(releaseBar instanceof HTMLElement)) return;
-    event.stopPropagation();
-    openReleaseDateEditor(releaseBar.dataset.releaseProject);
-  };
-
-  container.onmousedown = (event) => {
-    if (event.button !== 0) return;
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target) return;
-
-    const releaseBar = target.closest(".release-stage-bar");
-    if (releaseBar instanceof HTMLElement) {
-      event.stopPropagation();
-      startReleaseDrag(event, releaseBar);
-      return;
-    }
-
-    const stageBar = target.closest(".stage-bar");
-    if (stageBar instanceof HTMLElement) {
-      const handle = target.closest("[data-resize]");
-      startStageDrag(event, stageBar, handle?.dataset.resize || "move");
-    }
-  };
-
-  container.querySelectorAll(".g-line").forEach((line) => {
-    line.addEventListener("mousemove", (event) => {
-      renderStageGhost(line, event);
-    });
-    line.addEventListener("mouseleave", () => removeStageGhost(line));
-  });
 }
 
 function renderTimelineYearChips() {
