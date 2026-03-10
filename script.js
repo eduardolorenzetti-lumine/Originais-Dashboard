@@ -1382,9 +1382,10 @@ function renderGantt() {
   html += "</div>";
 
   list.forEach((project) => {
-    const incubated = isIncubatedProject(project);
-    html += `<div class="gantt-row ${incubated ? "is-incubated" : ""}" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
-    html += `<div class="g-left">
+    try {
+      const incubated = isIncubatedProject(project);
+      html += `<div class="gantt-row ${incubated ? "is-incubated" : ""}" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
+      html += `<div class="g-left">
       ${
         editable
           ? `<button type="button" class="g-open" data-open-project="${project.id}">`
@@ -1396,43 +1397,52 @@ function renderGantt() {
       ${editable ? `<button type="button" class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
     </div>`;
 
-    html += `<div class="g-line" data-line-project="${project.id}">`;
-    months.forEach((m, idx) => {
-      if (idx > 0 && String(m).endsWith("-01")) {
-        html += `<div class="g-year-divider" style="left: calc(${idx} * var(--month-width));" aria-hidden="true"></div>`;
-      }
-    });
-    project.stages.forEach((st) => {
-      const start = monthToIndex(st.start) - monthToIndex(state.timeline.start);
-      const end = monthToIndex(st.end) - monthToIndex(state.timeline.start);
-      if (end < 0 || start >= months.length) return;
-      const visStart = Math.max(0, start);
-      const visEnd = Math.min(months.length - 1, end);
-      const width = visEnd - visStart + 1;
-      const stageDef = state.settings.stages.find((s) => s.id === st.stageId);
-      const color = stageDef?.color || "#cbd5e1";
-      const stageLabel = stageDef?.name || st.name || "Etapa";
-      const stageTitle = `${stageLabel}: ${monthHoverLabel(st.start)} - ${monthHoverLabel(st.end)}`;
-      const selected = selectedStageRef && selectedStageRef.projectId === project.id && selectedStageRef.stageId === st.id;
+      html += `<div class="g-line" data-line-project="${project.id}">`;
+      months.forEach((m, idx) => {
+        if (idx > 0 && String(m).endsWith("-01")) {
+          html += `<div class="g-year-divider" style="left: calc(${idx} * var(--month-width));" aria-hidden="true"></div>`;
+        }
+      });
+      const stages = Array.isArray(project?.stages) ? project.stages : [];
+      stages.forEach((st) => {
+        if (!st || !isValidMonth(st.start) || !isValidMonth(st.end)) return;
+        const startIndex = monthToIndex(st.start);
+        const endIndex = monthToIndex(st.end);
+        if (!Number.isFinite(startIndex) || !Number.isFinite(endIndex)) return;
+        const start = startIndex - monthToIndex(state.timeline.start);
+        const end = endIndex - monthToIndex(state.timeline.start);
+        if (end < 0 || start >= months.length) return;
+        const visStart = Math.max(0, start);
+        const visEnd = Math.min(months.length - 1, end);
+        const width = visEnd - visStart + 1;
+        if (!Number.isFinite(width) || width <= 0) return;
+        const stageDef = state.settings.stages.find((s) => s.id === st.stageId);
+        const color = stageDef?.color || "#cbd5e1";
+        const stageLabel = stageDef?.name || st.name || "Etapa";
+        const stageTitle = `${stageLabel}: ${monthHoverLabel(st.start)} - ${monthHoverLabel(st.end)}`;
+        const selected = selectedStageRef && selectedStageRef.projectId === project.id && selectedStageRef.stageId === st.id;
 
-      html += `<div class="stage-bar ${selected ? "selected" : ""}" style="left: calc(${visStart} * var(--month-width)); width: calc(${width} * var(--month-width) - 2px); background:${color}" data-project="${project.id}" data-stage="${st.id}" title="${escapeHtml(stageTitle)}">
+        html += `<div class="stage-bar ${selected ? "selected" : ""}" style="left: calc(${visStart} * var(--month-width)); width: calc(${width} * var(--month-width) - 2px); background:${color}" data-project="${project.id}" data-stage="${st.id}" title="${escapeHtml(stageTitle)}">
         <span class="label">${escapeHtml(stageLabel)}</span>
         <span class="stage-handle left" data-resize="left"></span>
         <span class="stage-handle right" data-resize="right"></span>
       </div>`;
-    });
+      });
 
-    const releaseMarker = getReleaseMarkerData(project.releaseDate, state.timeline.start, state.timeline.end);
-    if (releaseMarker) {
-      html += `<div class="release-stage-bar" style="left: calc(${releaseMarker.offsetMonths} * var(--month-width)); width: calc(1 * var(--month-width) - 2px);" data-release-project="${project.id}" title="Lançamento: ${escapeHtml(
-        releaseMarker.label
-      )}">
+      const releaseMarker = getReleaseMarkerData(project.releaseDate, state.timeline.start, state.timeline.end);
+      if (releaseMarker) {
+        html += `<div class="release-stage-bar" style="left: calc(${releaseMarker.offsetMonths} * var(--month-width)); width: calc(1 * var(--month-width) - 2px);" data-release-project="${project.id}" title="Lançamento: ${escapeHtml(
+          releaseMarker.label
+        )}">
         <span class="label">LAN</span>
         <span class="stage-handle left"></span>
         <span class="stage-handle right"></span>
       </div>`;
+      }
+      html += "</div></div>";
+    } catch (error) {
+      console.warn("[Originais] Falha ao renderizar linha do cronograma.", project?.id, error);
     }
-    html += "</div></div>";
   });
 
   if (hasCurrentMarker) {
@@ -1451,68 +1461,83 @@ function renderGantt() {
 
   if (!editable) {
     container.onclick = null;
+    container.onmousedown = null;
+    container.ondblclick = null;
     return;
   }
-  container.onclick = null;
+  container.onclick = (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
 
-  container.querySelectorAll("[data-open-project]").forEach((el) => {
-    el.addEventListener("click", (event) => {
+    const openBtn = target.closest("[data-open-project]");
+    if (openBtn instanceof HTMLElement) {
       event.preventDefault();
       event.stopPropagation();
-      openProjectDialog(el.dataset.openProject);
-    });
-  });
+      openProjectDialog(openBtn.dataset.openProject);
+      return;
+    }
 
-  container.querySelectorAll("[data-add-stage]").forEach((el) => {
-    el.addEventListener("click", (event) => {
+    const addBtn = target.closest("[data-add-stage]");
+    if (addBtn instanceof HTMLElement) {
       event.preventDefault();
       event.stopPropagation();
-      openStageDialog(el.dataset.addStage);
-    });
-  });
+      openStageDialog(addBtn.dataset.addStage);
+      return;
+    }
 
-  container.querySelectorAll(".stage-bar").forEach((bar) => {
-    bar.addEventListener("click", (event) => {
+    const stageBar = target.closest(".stage-bar");
+    if (stageBar instanceof HTMLElement) {
       event.stopPropagation();
       if (Date.now() < suppressLineClickUntil) return;
-      openStageDialog(bar.dataset.project, bar.dataset.stage);
-    });
-    bar.addEventListener("mousedown", (event) => {
-      if (event.button !== 0) return;
-      const target = event.target instanceof Element ? event.target : null;
-      const handle = target?.closest("[data-resize]");
-      startStageDrag(event, bar, handle?.dataset.resize || "move");
-    });
-  });
+      openStageDialog(stageBar.dataset.project, stageBar.dataset.stage);
+      return;
+    }
 
-  container.querySelectorAll(".release-stage-bar").forEach((bar) => {
-    bar.addEventListener("dblclick", (event) => {
+    const line = target.closest(".g-line");
+    if (!(line instanceof HTMLElement)) return;
+    if (Date.now() < suppressLineClickUntil) return;
+    if (target.closest(".stage-bar, .release-stage-bar")) return;
+    const projectId = line.dataset.lineProject;
+    const project = state.projects.find((item) => item.id === projectId);
+    if (!project) return;
+    const idx = monthIndexFromLinePointer(line, event);
+    if (idx == null) return;
+    const month = addMonths(state.timeline.start, idx);
+    openStageDialog(projectId, null, month);
+  };
+
+  container.ondblclick = (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const releaseBar = target?.closest(".release-stage-bar");
+    if (!(releaseBar instanceof HTMLElement)) return;
+    event.stopPropagation();
+    openReleaseDateEditor(releaseBar.dataset.releaseProject);
+  };
+
+  container.onmousedown = (event) => {
+    if (event.button !== 0) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return;
+
+    const releaseBar = target.closest(".release-stage-bar");
+    if (releaseBar instanceof HTMLElement) {
       event.stopPropagation();
-      openReleaseDateEditor(bar.dataset.releaseProject);
-    });
-    bar.addEventListener("mousedown", (event) => {
-      if (event.button !== 0) return;
-      event.stopPropagation();
-      startReleaseDrag(event, bar);
-    });
-  });
+      startReleaseDrag(event, releaseBar);
+      return;
+    }
+
+    const stageBar = target.closest(".stage-bar");
+    if (stageBar instanceof HTMLElement) {
+      const handle = target.closest("[data-resize]");
+      startStageDrag(event, stageBar, handle?.dataset.resize || "move");
+    }
+  };
 
   container.querySelectorAll(".g-line").forEach((line) => {
-    const projectId = line.dataset.lineProject;
     line.addEventListener("mousemove", (event) => {
       renderStageGhost(line, event);
     });
     line.addEventListener("mouseleave", () => removeStageGhost(line));
-    line.addEventListener("click", (event) => {
-      if (Date.now() < suppressLineClickUntil) return;
-      if (event.target instanceof Element && event.target.closest(".stage-bar, .release-stage-bar")) return;
-      const project = state.projects.find((item) => item.id === projectId);
-      if (!project) return;
-      const idx = monthIndexFromLinePointer(line, event);
-      if (idx == null) return;
-      const month = addMonths(state.timeline.start, idx);
-      openStageDialog(projectId, null, month);
-    });
   });
 }
 
@@ -3444,12 +3469,14 @@ function monthLabelParts(isoMonth) {
 }
 
 function monthHoverLabel(isoMonth) {
+  if (!isValidMonth(isoMonth)) return "";
   const labels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
   const [y, m] = isoMonth.split("-");
   return `${labels[Number(m) - 1]}/${y}`;
 }
 
 function monthLabelLong(isoMonth) {
+  if (!isValidMonth(isoMonth)) return "";
   const labels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
   const [y, m] = isoMonth.split("-");
   return `${labels[Number(m) - 1]} ${y}`;
