@@ -1674,6 +1674,43 @@ tbody tr:hover {
   display: none;
 }
 
+#configItemSingleDayWrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--input-bg);
+}
+
+#configItemSingleDayWrap[hidden] {
+  display: none;
+}
+
+#configItemSingleDayWrap span {
+  font-size: 0.82rem;
+  color: var(--text);
+}
+
+#configItemSingleDay {
+  width: 16px;
+  height: 16px;
+}
+
+.config-stage-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 0.66rem;
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
 dialog {
   width: min(980px, 96vw);
   border: 1px solid var(--line);

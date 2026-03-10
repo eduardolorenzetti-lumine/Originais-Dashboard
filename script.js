@@ -699,12 +699,6 @@ function bindDialog() {
     const stageWrap = document.getElementById("projectStages");
     const projectId = document.getElementById("projectId").value;
     const project = state.projects.find((item) => item.id === projectId);
-    const statusValue = document.getElementById("projectStatus")?.value || project?.status || "";
-    if (isIncubatedStatusValue(statusValue)) {
-      alert("Projetos com status INCUBADO não permitem inclusão de etapas.");
-      updateProjectStageAddButtonState();
-      return;
-    }
     const usedStageIds = getUsedStageIdsFromStageRows(stageWrap);
     if (project) {
       getUsedStageIdsFromProject(project).forEach((stageId) => usedStageIds.add(stageId));
@@ -1302,26 +1296,19 @@ function canProjectAddMoreStages(project) {
 function updateProjectStageAddButtonState() {
   const addStageButton = document.getElementById("btnAddStage");
   const stageWrap = document.getElementById("projectStages");
-  const statusSelect = document.getElementById("projectStatus");
-  if (!addStageButton || !stageWrap || !statusSelect) return;
+  if (!addStageButton || !stageWrap) return;
 
   const projectId = document.getElementById("projectId")?.value || "";
   const project = state.projects.find((item) => item.id === projectId);
-  const statusValue = statusSelect.value || project?.status || "";
-  const incubated = isIncubatedStatusValue(statusValue);
   const usedStageIds = getUsedStageIdsFromStageRows(stageWrap);
 
   if (project) {
     getUsedStageIdsFromProject(project).forEach((stageId) => usedStageIds.add(stageId));
   }
 
-  const hasNextStage = incubated ? false : Boolean(getNextAvailableStageIdByUsedSet(usedStageIds));
-  addStageButton.disabled = !canEditContent() || incubated || !hasNextStage;
-  addStageButton.title = incubated
-    ? "Projetos INCUBADO não permitem inclusão de etapas."
-    : hasNextStage
-      ? "Adicionar etapa"
-      : "Todas as etapas cadastradas já foram adicionadas neste projeto.";
+  const hasNextStage = Boolean(getNextAvailableStageIdByUsedSet(usedStageIds));
+  addStageButton.disabled = !canEditContent() || !hasNextStage;
+  addStageButton.title = hasNextStage ? "Adicionar etapa" : "Todas as etapas cadastradas já foram adicionadas neste projeto.";
 }
 
 function getProjectYear(project) {
@@ -1406,10 +1393,10 @@ function renderGantt() {
         <span class="g-code">${escapeHtml(project.code || "")}</span>
         <span class="g-title">${escapeHtml(project.title)}</span>
       ${editable ? "</button>" : "</span>"}
-      ${editable && !incubated ? `<button type="button" class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
+      ${editable ? `<button type="button" class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
     </div>`;
 
-    html += `<div class="g-line" data-line-project="${project.id}" data-incubated="${incubated ? "1" : "0"}">`;
+    html += `<div class="g-line" data-line-project="${project.id}">`;
     months.forEach((m, idx) => {
       if (idx > 0 && String(m).endsWith("-01")) {
         html += `<div class="g-year-divider" style="left: calc(${idx} * var(--month-width));" aria-hidden="true"></div>`;
@@ -1480,12 +1467,6 @@ function renderGantt() {
     el.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const project = state.projects.find((item) => item.id === el.dataset.addStage);
-      if (!project) return;
-      if (isIncubatedProject(project)) {
-        alert("Projetos com status INCUBADO não permitem inclusão de etapas.");
-        return;
-      }
       openStageDialog(el.dataset.addStage);
     });
   });
@@ -1518,12 +1499,7 @@ function renderGantt() {
 
   container.querySelectorAll(".g-line").forEach((line) => {
     const projectId = line.dataset.lineProject;
-    const incubated = line.dataset.incubated === "1";
     line.addEventListener("mousemove", (event) => {
-      if (incubated) {
-        removeStageGhost(line);
-        return;
-      }
       renderStageGhost(line, event);
     });
     line.addEventListener("mouseleave", () => removeStageGhost(line));
@@ -1532,7 +1508,6 @@ function renderGantt() {
       if (event.target instanceof Element && event.target.closest(".stage-bar, .release-stage-bar")) return;
       const project = state.projects.find((item) => item.id === projectId);
       if (!project) return;
-      if (isIncubatedProject(project)) return;
       const idx = monthIndexFromLinePointer(line, event);
       if (idx == null) return;
       const month = addMonths(state.timeline.start, idx);
@@ -1628,10 +1603,6 @@ function openStageDialog(projectId, stageId = null, forcedStart = null) {
   }
   const project = state.projects.find((p) => p.id === projectId);
   if (!project) return;
-  if (!stageId && isIncubatedProject(project)) {
-    alert("Projetos com status INCUBADO não permitem inclusão de etapas.");
-    return;
-  }
   const suggestedStageId = stageId ? "" : getNextAvailableStageIdForProject(project) || state.settings.stages[0]?.id || "";
   const stage = stageId ? project.stages.find((s) => s.id === stageId) : null;
   const dialog = document.getElementById("stageDialog");
@@ -2515,6 +2486,7 @@ function renderConfigList() {
       <span class="config-item-main">
         ${editable ? '<button type="button" class="btn light config-drag-btn" draggable="true" title="Arrastar para ordenar" aria-label="Arrastar para ordenar">⋮⋮</button>' : ""}
         <span class="config-item-label">${escapeHtml(item.name)}</span>
+        ${isSingleDayStage(item) ? '<span class="config-stage-flag">1 dia</span>' : ""}
       </span>
       <span class="actions">
         ${
@@ -2599,9 +2571,8 @@ function addConfigItem() {
     return;
   }
   if (selectedConfigKey === "stages") {
-    const name = prompt("Nome da etapa:");
-    if (!name || !name.trim()) return;
-    state.settings.stages.push({ id: uid(), name: name.trim(), color: randomColor() });
+    openConfigItemDialog("__new__");
+    return;
   } else {
     const label = CONFIG_SINGULAR_META[selectedConfigKey];
     const value = prompt(`Novo ${label}:`);
@@ -2662,15 +2633,26 @@ function openConfigItemDialog(id) {
   const nameInput = document.getElementById("configItemName");
   const colorInput = document.getElementById("configItemColor");
   const colorWrap = document.getElementById("configItemColorWrap");
+  const singleDayWrap = document.getElementById("configItemSingleDayWrap");
+  const singleDayInput = document.getElementById("configItemSingleDay");
 
   let currentName = "";
   let currentColor = randomColor();
+  let currentSingleDay = false;
+  const isNew = id === "__new__";
 
   if (key === "stages") {
-    const stage = state.settings.stages.find((item) => item.id === id);
-    if (!stage) return;
-    currentName = stage.name;
-    currentColor = stage.color || randomColor();
+    if (isNew) {
+      currentName = "";
+      currentColor = randomColor();
+      currentSingleDay = false;
+    } else {
+      const stage = state.settings.stages.find((item) => item.id === id);
+      if (!stage) return;
+      currentName = stage.name;
+      currentColor = stage.color || randomColor();
+      currentSingleDay = isSingleDayStage(stage);
+    }
   } else {
     const idx = Number(id);
     const item = state.settings[key]?.[idx];
@@ -2679,12 +2661,14 @@ function openConfigItemDialog(id) {
     currentColor = getConfigItemColor(key, item, idx);
   }
 
-  title.textContent = `Editar ${CONFIG_META[key]}`;
+  title.textContent = isNew ? `Nova ${CONFIG_META[key]}` : `Editar ${CONFIG_META[key]}`;
   document.getElementById("configItemKey").value = key;
   document.getElementById("configItemId").value = id;
   nameInput.value = currentName;
   colorWrap.hidden = !isColorEnabledConfigKey(key);
   colorInput.value = currentColor;
+  singleDayWrap.hidden = key !== "stages";
+  singleDayInput.checked = Boolean(currentSingleDay);
   dialog.showModal();
 }
 
@@ -2694,17 +2678,31 @@ function saveConfigItemDialog() {
   const id = document.getElementById("configItemId").value;
   const nameInput = document.getElementById("configItemName");
   const colorInput = document.getElementById("configItemColor");
+  const singleDayInput = document.getElementById("configItemSingleDay");
   const nextName = String(nameInput.value || "").trim();
   if (!nextName) return;
 
   const nextColor = normalizeHexColor(colorInput.value) || randomColor();
   const hasColor = isColorEnabledConfigKey(key);
+  const nextSingleDay = Boolean(singleDayInput?.checked);
 
   if (key === "stages") {
+    if (id === "__new__") {
+      state.settings.stages.push({
+        id: uid(),
+        name: nextName,
+        color: hasColor ? nextColor : randomColor(),
+        singleDay: nextSingleDay
+      });
+      saveState();
+      renderAll();
+      return;
+    }
     const stage = state.settings.stages.find((item) => item.id === id);
     if (!stage) return;
     stage.name = nextName;
     if (hasColor) stage.color = nextColor;
+    stage.singleDay = nextSingleDay;
   } else {
     const arr = state.settings[key] || [];
     const idx = Number(id);
@@ -2898,7 +2896,7 @@ function buildStateFromBase44Exports(fileMap, fallbackState) {
       id: row.id || uid(),
       name: row.name || "Etapa",
       color: colorKeyToHex(row.color),
-      singleDay: String(row.single_day || "").toLowerCase() === "true"
+      singleDay: isSingleDayStage({ singleDay: row.single_day })
     };
     stageTypeByName[String(obj.name).toLowerCase()] = obj;
     return obj;
@@ -2962,7 +2960,7 @@ function buildStateFromBase44Exports(fileMap, fallbackState) {
     natures: uniq([...pickName(natureRows), ...projects.map((p) => p.nature)]),
     durations: uniq([...pickName(durationRows), ...projects.map((p) => p.duration)]),
     statuses: uniq([...pickName(statusRows), ...projects.map((p) => p.status)]),
-    stages: stages.length ? stages : fallbackState.settings.stages
+    stages: normalizeSettingsStages(stages.length ? stages : fallbackState.settings.stages, fallbackState.settings.stages)
   };
   settings.itemColors = mergeItemColors(buildDefaultItemColors(settings), {
     categories: buildItemColorMap(categoryRows, settings.categories, DEFAULT_ITEM_COLOR_PALETTES.categories),
@@ -3366,14 +3364,22 @@ function countByYearWithMissing(projects) {
 }
 
 function avgMonthsByStage(projects) {
+  const allowedStageIds = new Set(
+    (state.settings.stages || [])
+      .filter((stage) => String(stage?.name || "").trim())
+      .filter((stage) => !isSingleDayStage(stage))
+      .map((stage) => stage.id)
+  );
   const acc = Object.fromEntries(
     state.settings.stages
       .filter((stage) => String(stage?.name || "").trim())
+      .filter((stage) => !isSingleDayStage(stage))
       .map((stage) => [stage.id, { name: stage.name, total: 0, count: 0 }])
   );
 
   projects.forEach((p) => {
     p.stages.forEach((s) => {
+      if (!allowedStageIds.has(s.stageId)) return;
       if (!acc[s.stageId] || !isValidMonth(s.start) || !isValidMonth(s.end)) return;
       const months = monthToIndex(s.end) - monthToIndex(s.start) + 1;
       if (!Number.isFinite(months) || months <= 0) return;
@@ -3703,6 +3709,36 @@ function normalizeHexColor(value) {
   const color = String(value || "").trim();
   if (/^#[0-9a-fA-F]{6}$/.test(color)) return color.toLowerCase();
   return "";
+}
+
+function isSingleDayStage(stage) {
+  if (!stage || typeof stage !== "object") return false;
+  const raw = stage.singleDay ?? stage.single_day ?? stage.oneDay ?? stage.one_day ?? false;
+  if (typeof raw === "boolean") return raw;
+  return String(raw || "").trim().toLowerCase() === "true";
+}
+
+function normalizeSettingsStages(stages, fallbackStages = []) {
+  const source = Array.isArray(stages) && stages.length ? stages : Array.isArray(fallbackStages) ? fallbackStages : [];
+  const normalized = source
+    .map((stage) => {
+      if (!stage || typeof stage !== "object") return null;
+      const id = String(stage.id || "").trim() || uid();
+      const name = String(stage.name || "").trim();
+      if (!name) return null;
+      return {
+        id,
+        name,
+        color: normalizeHexColor(stage.color) || randomColor(),
+        singleDay: isSingleDayStage(stage)
+      };
+    })
+    .filter(Boolean);
+  if (normalized.length) return normalized;
+  if (Array.isArray(fallbackStages) && fallbackStages !== source && fallbackStages.length) {
+    return normalizeSettingsStages(fallbackStages, []);
+  }
+  return [];
 }
 
 function buildDefaultItemColors(settings = {}) {
@@ -4785,7 +4821,7 @@ function mergeState(parsed) {
     natures: pickArray(parsed?.settings?.natures, base.settings.natures),
     durations: pickArray(parsed?.settings?.durations, base.settings.durations),
     statuses: pickArray(parsed?.settings?.statuses, base.settings.statuses),
-    stages: pickArray(parsed?.settings?.stages, base.settings.stages)
+    stages: normalizeSettingsStages(pickArray(parsed?.settings?.stages, base.settings.stages), base.settings.stages)
   };
   mergedSettings.itemColors = mergeItemColors(buildDefaultItemColors(mergedSettings), parsed?.settings?.itemColors || base.settings.itemColors);
 
@@ -4841,6 +4877,7 @@ function seedState() {
   if (window.BASE44_SEED?.projects?.length) {
     const cloned = structuredClone(window.BASE44_SEED);
     cloned.settings = cloned.settings || {};
+    cloned.settings.stages = normalizeSettingsStages(cloned.settings.stages, []);
     cloned.users = Array.isArray(cloned.users) && cloned.users.length
       ? cloned.users.map((user) => ({
           id: user.id || uid(),
@@ -4881,11 +4918,11 @@ function seedState() {
   }
 
   const stages = [
-    { id: uid(), name: "Desenvolvimento", color: "#34d399" },
-    { id: uid(), name: "Pré-produção", color: "#60a5fa" },
-    { id: uid(), name: "Produção", color: "#fcd34d" },
-    { id: uid(), name: "Pós-produção", color: "#f472b6" },
-    { id: uid(), name: "Distribuição", color: "#a78bfa" }
+    { id: uid(), name: "Desenvolvimento", color: "#34d399", singleDay: false },
+    { id: uid(), name: "Pré-produção", color: "#60a5fa", singleDay: false },
+    { id: uid(), name: "Produção", color: "#fcd34d", singleDay: false },
+    { id: uid(), name: "Pós-produção", color: "#f472b6", singleDay: false },
+    { id: uid(), name: "Distribuição", color: "#a78bfa", singleDay: false }
   ];
 
   const projects = [
