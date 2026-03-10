@@ -1462,54 +1462,40 @@ function renderGantt() {
     container.onclick = null;
     return;
   }
+  container.onclick = null;
 
-  container.onclick = (event) => {
-    const addButton = event.target.closest("[data-add-stage]");
-    if (addButton) {
+  container.querySelectorAll("[data-open-project]").forEach((el) => {
+    el.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const project = state.projects.find((item) => item.id === addButton.dataset.addStage);
+      openProjectDialog(el.dataset.openProject);
+    });
+  });
+
+  container.querySelectorAll("[data-add-stage]").forEach((el) => {
+    el.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const project = state.projects.find((item) => item.id === el.dataset.addStage);
       if (!project) return;
       if (isIncubatedProject(project)) {
         alert("Projetos com status INCUBADO não permitem inclusão de etapas.");
         return;
       }
-      openStageDialog(addButton.dataset.addStage);
-      return;
-    }
-
-    const openButton = event.target.closest("[data-open-project]");
-    if (openButton) {
-      event.preventDefault();
-      event.stopPropagation();
-      openProjectDialog(openButton.dataset.openProject);
-      return;
-    }
-
-    if (event.target.closest(".stage-bar, .release-stage-bar")) return;
-    const line = event.target.closest(".g-line");
-    if (!line) return;
-
-    if (Date.now() < suppressLineClickUntil) return;
-    const projectId = line.dataset.lineProject;
-    const project = state.projects.find((item) => item.id === projectId);
-    if (!project) return;
-    if (isIncubatedProject(project)) return;
-    const idx = monthIndexFromLinePointer(line, event);
-    if (idx == null) return;
-    const month = addMonths(state.timeline.start, idx);
-    openStageDialog(projectId, null, month);
-  };
+      openStageDialog(el.dataset.addStage);
+    });
+  });
 
   container.querySelectorAll(".stage-bar").forEach((bar) => {
-    bar.addEventListener("click", () => {
-      selectedStageRef = { projectId: bar.dataset.project, stageId: bar.dataset.stage };
-      renderGantt();
+    bar.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (Date.now() < suppressLineClickUntil) return;
+      openStageDialog(bar.dataset.project, bar.dataset.stage);
     });
-    bar.addEventListener("dblclick", () => openStageDialog(bar.dataset.project, bar.dataset.stage));
     bar.addEventListener("mousedown", (event) => {
       if (event.button !== 0) return;
-      const handle = event.target.closest("[data-resize]");
+      const target = event.target instanceof Element ? event.target : null;
+      const handle = target?.closest("[data-resize]");
       startStageDrag(event, bar, handle?.dataset.resize || "move");
     });
   });
@@ -1527,6 +1513,7 @@ function renderGantt() {
   });
 
   container.querySelectorAll(".g-line").forEach((line) => {
+    const projectId = line.dataset.lineProject;
     const incubated = line.dataset.incubated === "1";
     line.addEventListener("mousemove", (event) => {
       if (incubated) {
@@ -1536,6 +1523,17 @@ function renderGantt() {
       renderStageGhost(line, event);
     });
     line.addEventListener("mouseleave", () => removeStageGhost(line));
+    line.addEventListener("click", (event) => {
+      if (Date.now() < suppressLineClickUntil) return;
+      if (event.target instanceof Element && event.target.closest(".stage-bar, .release-stage-bar")) return;
+      const project = state.projects.find((item) => item.id === projectId);
+      if (!project) return;
+      if (isIncubatedProject(project)) return;
+      const idx = monthIndexFromLinePointer(line, event);
+      if (idx == null) return;
+      const month = addMonths(state.timeline.start, idx);
+      openStageDialog(projectId, null, month);
+    });
   });
 }
 
