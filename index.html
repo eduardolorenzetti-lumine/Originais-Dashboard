@@ -95,7 +95,7 @@
             <strong>ANO:</strong>
             <div id="yearChips" class="chips"></div>
           </div>
-          <button id="dashboardFiltersToggle" class="btn light">Filtros <span class="filter-arrow">▾</span></button>
+          <button id="dashboardFiltersToggle" class="btn light filter-toggle-btn">Filtros <span class="filter-arrow" aria-hidden="true"></span></button>
         </div>
 
         <section id="dashboardFiltersPanel" class="dashboard-filters" hidden>
@@ -176,7 +176,7 @@
             <div id="timelineYears" class="chips"></div>
           </div>
           <div class="header-actions">
-            <button id="btnFilterGantt" class="btn light">Filtros <span class="filter-arrow">▾</span></button>
+            <button id="btnFilterGantt" class="btn light filter-toggle-btn">Filtros <span class="filter-arrow" aria-hidden="true"></span></button>
           </div>
         </div>
 
@@ -234,11 +234,6 @@
               <h1>Projetos</h1>
               <p>Gerencie suas produções audiovisuais</p>
             </div>
-            <div class="header-actions">
-              <button id="btnImportCsv" class="btn light">Importar CSV</button>
-              <input id="csvInput" type="file" accept=".csv" multiple hidden />
-              <button id="btnNewProject" class="btn accent">+ Novo Projeto</button>
-            </div>
           </header>
 
           <div class="dashboard-top-controls">
@@ -247,7 +242,7 @@
               <div id="projectYears" class="chips"></div>
             </div>
             <div class="header-actions">
-              <button id="btnFilterProjects" class="btn light">Filtros <span class="filter-arrow">▾</span></button>
+              <button id="btnFilterProjects" class="btn light filter-toggle-btn">Filtros <span class="filter-arrow" aria-hidden="true"></span></button>
             </div>
           </div>
 
@@ -276,6 +271,17 @@
 
           <div class="table-tools">
             <input id="projectSearch" placeholder="Buscar por nome ou SKU..." />
+            <div class="project-tools-actions">
+              <button id="btnImportCsv" class="btn light project-import-btn" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l4 4h-3v7h-2V7H8l4-4zm-7 12h2v4h10v-4h2v6H5v-6z"/></svg>
+                <span>Importar CSV</span>
+              </button>
+              <input id="csvInput" type="file" accept=".csv" multiple hidden />
+              <button id="btnNewProject" class="btn accent project-new-btn" type="button">
+                <span class="plus">+</span>
+                <span>Novo Projeto</span>
+              </button>
+            </div>
           </div>
         </div>
 

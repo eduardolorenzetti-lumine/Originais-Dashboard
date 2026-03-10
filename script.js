@@ -119,6 +119,7 @@ let hasLoggedSupabaseTarget = false;
 let supabaseBaseState = null;
 let currentThemePreference = "system";
 let systemThemeMediaQuery = null;
+let pendingGanttMeasureRetry = false;
 const ALLOWED_TABS = new Set(["dashboard", "cronograma", "projetos", "usuarios", "configuracoes"]);
 const FIELD_TO_SETTINGS_KEY = {
   category: "categories",
@@ -218,8 +219,8 @@ async function init() {
   bindAuthActions();
   restoreSessionUser();
   restoreCurrentTab();
-  renderAll();
   applyAuthVisibility();
+  renderAll();
   queueSupabaseSync(JSON.stringify(state));
 }
 
@@ -668,6 +669,7 @@ function bindDialog() {
   const projectReleaseDatePickerInput = document.getElementById("projectReleaseDatePicker");
   const projectReleaseDateOpenBtn = document.getElementById("projectReleaseDateOpen");
   const projectBudgetInput = document.getElementById("projectBudget");
+  const projectStatusSelect = document.getElementById("projectStatus");
 
   document.getElementById("btnCancelDialog").addEventListener("click", () => dialog.close());
 
@@ -690,8 +692,29 @@ function bindDialog() {
       alert("Perfil LEITOR possui apenas visualização.");
       return;
     }
-    document.getElementById("projectStages").appendChild(buildStageRow());
+    const stageWrap = document.getElementById("projectStages");
+    const projectId = document.getElementById("projectId").value;
+    const project = state.projects.find((item) => item.id === projectId);
+    const statusValue = document.getElementById("projectStatus")?.value || project?.status || "";
+    if (isIncubatedStatusValue(statusValue)) {
+      alert("Projetos com status INCUBADO não permitem inclusão de etapas.");
+      updateProjectStageAddButtonState();
+      return;
+    }
+    const usedStageIds = getUsedStageIdsFromStageRows(stageWrap);
+    if (project) {
+      getUsedStageIdsFromProject(project).forEach((stageId) => usedStageIds.add(stageId));
+    }
+    const nextStageId = getNextAvailableStageIdByUsedSet(usedStageIds);
+    if (!nextStageId) {
+      alert("Todas as etapas cadastradas já foram adicionadas neste projeto.");
+      updateProjectStageAddButtonState();
+      return;
+    }
+    stageWrap.appendChild(buildStageRow(null, { preferredStageId: nextStageId }));
+    updateProjectStageAddButtonState();
   });
+  projectStatusSelect?.addEventListener("change", updateProjectStageAddButtonState);
 
   const syncReleaseTextAndPicker = (rawValue, shouldAlert = false) => {
     const raw = String(rawValue || "").trim();
@@ -936,12 +959,12 @@ function renderDashboard() {
 
 function renderDashboardYearChips() {
   const years = [...new Set(state.projects.map((p) => getProjectYear(p)).filter((y) => y > 0))].sort((a, b) => a - b);
-  const hasMissingYear = state.projects.some((project) => !getProjectYear(project));
+  selectedDashboardYears.delete("__no_year");
   const allActive = selectedDashboardYears.size === 0;
-  const chips = ["Todos", ...years, ...(hasMissingYear ? ["SEM ANO"] : [])];
+  const chips = ["Todos", ...years];
   document.getElementById("yearChips").innerHTML = chips
     .map((y) => {
-      const value = y === "Todos" ? "__all" : y === "SEM ANO" ? "__no_year" : String(y);
+      const value = y === "Todos" ? "__all" : String(y);
       const active = y === "Todos" ? allActive : selectedDashboardYears.has(value);
       return `<button class="chip ${active ? "active" : ""}" data-year="${value}">${y}</button>`;
     })
@@ -981,7 +1004,7 @@ function renderDashboardExtraFilters() {
   const panel = document.getElementById("dashboardFiltersPanel");
   const toggle = document.getElementById("dashboardFiltersToggle");
   panel.hidden = !dashboardFiltersOpen;
-  toggle.innerHTML = `Filtros <span class="filter-arrow">${dashboardFiltersOpen ? "▴" : "▾"}</span>`;
+  setFilterToggleButton(toggle, dashboardFiltersOpen);
   const categoryValues = uniq(state.settings.categories).filter(Boolean);
   const formatValues = uniq(state.settings.formats).filter(Boolean);
   const natureValues = uniq(state.settings.natures).filter(Boolean);
@@ -1221,6 +1244,82 @@ function sanitizeFilterSet(selectedSet, allowedValues) {
   });
 }
 
+function setFilterToggleButton(button, isOpen) {
+  if (!button) return;
+  button.classList.add("filter-toggle-btn");
+  button.innerHTML = `Filtros <span class="filter-arrow${isOpen ? " up" : ""}" aria-hidden="true"></span>`;
+}
+
+function isIncubatedStatusValue(statusValue) {
+  return normalizeSearchText(statusValue).includes("incubad");
+}
+
+function isIncubatedProject(project) {
+  return isIncubatedStatusValue(getProjectField(project, "status"));
+}
+
+function getUsedStageIdsFromProject(project) {
+  return new Set((project?.stages || []).map((stage) => String(stage?.stageId || "").trim()).filter(Boolean));
+}
+
+function getUsedStageIdsFromStageRows(stageWrap) {
+  if (!stageWrap) return new Set();
+  return new Set(
+    [...stageWrap.querySelectorAll(".stage-row [data-field='stageId']")]
+      .map((el) => String(el.value || "").trim())
+      .filter(Boolean)
+  );
+}
+
+function getNextAvailableStageIdByUsedSet(usedStageIds) {
+  for (const stage of state.settings.stages || []) {
+    const stageId = String(stage?.id || "").trim();
+    if (!stageId) continue;
+    if (!usedStageIds.has(stageId)) return stageId;
+  }
+  return "";
+}
+
+function getNextAvailableStageIdForProject(project, extraUsedStageIds = null) {
+  const used = getUsedStageIdsFromProject(project);
+  if (extraUsedStageIds instanceof Set) {
+    extraUsedStageIds.forEach((stageId) => {
+      const normalized = String(stageId || "").trim();
+      if (normalized) used.add(normalized);
+    });
+  }
+  return getNextAvailableStageIdByUsedSet(used);
+}
+
+function canProjectAddMoreStages(project) {
+  return Boolean(getNextAvailableStageIdForProject(project));
+}
+
+function updateProjectStageAddButtonState() {
+  const addStageButton = document.getElementById("btnAddStage");
+  const stageWrap = document.getElementById("projectStages");
+  const statusSelect = document.getElementById("projectStatus");
+  if (!addStageButton || !stageWrap || !statusSelect) return;
+
+  const projectId = document.getElementById("projectId")?.value || "";
+  const project = state.projects.find((item) => item.id === projectId);
+  const statusValue = statusSelect.value || project?.status || "";
+  const incubated = isIncubatedStatusValue(statusValue);
+  const usedStageIds = getUsedStageIdsFromStageRows(stageWrap);
+
+  if (project) {
+    getUsedStageIdsFromProject(project).forEach((stageId) => usedStageIds.add(stageId));
+  }
+
+  const hasNextStage = incubated ? false : Boolean(getNextAvailableStageIdByUsedSet(usedStageIds));
+  addStageButton.disabled = !canEditContent() || incubated || !hasNextStage;
+  addStageButton.title = incubated
+    ? "Projetos INCUBADO não permitem inclusão de etapas."
+    : hasNextStage
+      ? "Adicionar etapa"
+      : "Todas as etapas cadastradas já foram adicionadas neste projeto.";
+}
+
 function getProjectYear(project) {
   const normalizedReleaseDate = normalizeDateInput(project?.releaseDate || project?.release_date || project?.dataDeLancamento || project?.data_de_lancamento || "");
   if (normalizedReleaseDate) return Number(normalizedReleaseDate.slice(0, 4));
@@ -1253,12 +1352,22 @@ function renderGantt() {
     return;
   }
 
-  const containerWidth = Math.max(container.clientWidth, 320);
+  const measuredWidth = Number(container.clientWidth || 0);
+  const fallbackWidth = Math.max(Number(document.querySelector(".content")?.clientWidth || 0) - 36, 420);
+  const containerWidth = Math.max(measuredWidth, fallbackWidth);
+  const needsSecondMeasure = measuredWidth < 240 || fallbackWidth - measuredWidth > 180;
+  if (needsSecondMeasure && document.getElementById("cronograma")?.classList.contains("active") && !pendingGanttMeasureRetry) {
+    pendingGanttMeasureRetry = true;
+    requestAnimationFrame(() => {
+      pendingGanttMeasureRetry = false;
+      if (document.getElementById("cronograma")?.classList.contains("active")) renderGantt();
+    });
+  }
   const leftWidth = containerWidth < 540 ? 160 : containerWidth < 800 ? 210 : 270;
   const availableWidth = Math.max(containerWidth - leftWidth - 8, 140);
-  const minMonthWidth = containerWidth < 540 ? 12 : containerWidth < 800 ? 14 : 18;
-  const monthWidth = Math.max(minMonthWidth, Math.floor(availableWidth / months.length));
-  const timelineWidth = Math.max(months.length * monthWidth, availableWidth);
+  const minMonthWidth = containerWidth < 540 ? 20 : containerWidth < 800 ? 24 : 28;
+  const monthWidth = Math.max(minMonthWidth, availableWidth / months.length);
+  const timelineWidth = months.length * monthWidth;
   container.style.setProperty("--month-width", `${monthWidth}px`);
   const currentMonthIso = (() => {
     const now = new Date();
@@ -1271,12 +1380,20 @@ function renderGantt() {
   html += `<div class="gantt-head" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
   html += '<div class="g-left">PROJETO</div>';
   html += `<div class="g-months">${months
-    .map((m, idx) => `<div class="g-month ${idx > 0 && String(m).endsWith("-01") ? "year-separator" : ""}">${monthLabel(m)}</div>`)
+    .map((m, idx) => {
+      const parts = monthLabelParts(m);
+      return `<div class="g-month ${idx > 0 && String(m).endsWith("-01") ? "year-separator" : ""}">
+        <span class="m-name">${parts.month}</span>
+        <small class="m-year">${parts.year}</small>
+      </div>`;
+    })
     .join("")}</div>`;
   html += "</div>";
 
   list.forEach((project) => {
-    html += `<div class="gantt-row" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
+    const incubated = isIncubatedProject(project);
+    const canAddStage = canProjectAddMoreStages(project);
+    html += `<div class="gantt-row ${incubated ? "is-incubated" : ""}" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
     html += `<div class="g-left">
       ${
         editable
@@ -1286,10 +1403,15 @@ function renderGantt() {
         <span class="g-code">${escapeHtml(project.code || "")}</span>
         <span class="g-title">${escapeHtml(project.title)}</span>
       ${editable ? "</button>" : "</span>"}
-      ${editable ? `<button class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
+      <span class="g-actions">
+        ${editable && !incubated && canAddStage ? `<button class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
+        ${editable ? `<button class="g-view-stage" data-open-project="${project.id}" title="Abrir projeto" aria-label="Abrir projeto">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c5.23 0 9.27 4.11 10.73 6.05a1.53 1.53 0 0 1 0 1.9C21.27 14.89 17.23 19 12 19S2.73 14.89 1.27 12.95a1.53 1.53 0 0 1 0-1.9C2.73 9.11 6.77 5 12 5zm0 2C7.8 7 4.37 10.16 3.1 12 4.37 13.84 7.8 17 12 17s7.63-3.16 8.9-5C19.63 10.16 16.2 7 12 7zm0 2.5A2.5 2.5 0 1 1 9.5 12 2.5 2.5 0 0 1 12 9.5z"/></svg>
+        </button>` : ""}
+      </span>
     </div>`;
 
-    html += `<div class="g-line" data-line-project="${project.id}">`;
+    html += `<div class="g-line" data-line-project="${project.id}" data-incubated="${incubated ? "1" : "0"}" data-can-add="${canAddStage ? "1" : "0"}">`;
     months.forEach((m, idx) => {
       if (idx > 0 && String(m).endsWith("-01")) {
         html += `<div class="g-year-divider" style="left: calc(${idx} * var(--month-width));" aria-hidden="true"></div>`;
@@ -1349,7 +1471,19 @@ function renderGantt() {
   });
 
   container.querySelectorAll("[data-add-stage]").forEach((el) => {
-    el.addEventListener("click", () => openStageDialog(el.dataset.addStage));
+    el.addEventListener("click", () => {
+      const project = state.projects.find((item) => item.id === el.dataset.addStage);
+      if (!project) return;
+      if (isIncubatedProject(project)) {
+        alert("Projetos com status INCUBADO não permitem inclusão de etapas.");
+        return;
+      }
+      if (!canProjectAddMoreStages(project)) {
+        alert("Todas as etapas cadastradas já foram adicionadas neste projeto.");
+        return;
+      }
+      openStageDialog(el.dataset.addStage);
+    });
   });
 
   container.querySelectorAll(".stage-bar").forEach((bar) => {
@@ -1379,11 +1513,26 @@ function renderGantt() {
 
   container.querySelectorAll(".g-line").forEach((line) => {
     const projectId = line.dataset.lineProject;
-    line.addEventListener("mousemove", (event) => renderStageGhost(line, event));
+    const incubated = line.dataset.incubated === "1";
+    const canAdd = line.dataset.canAdd === "1";
+    line.addEventListener("mousemove", (event) => {
+      if (incubated || !canAdd) {
+        removeStageGhost(line);
+        return;
+      }
+      renderStageGhost(line, event);
+    });
     line.addEventListener("mouseleave", () => removeStageGhost(line));
     line.addEventListener("click", (event) => {
       if (Date.now() < suppressLineClickUntil) return;
       if (event.target.closest(".stage-bar, .release-stage-bar")) return;
+      const project = state.projects.find((item) => item.id === projectId);
+      if (!project) return;
+      if (isIncubatedProject(project)) return;
+      if (!canProjectAddMoreStages(project)) {
+        alert("Todas as etapas cadastradas já foram adicionadas neste projeto.");
+        return;
+      }
       const idx = monthIndexFromLinePointer(line, event);
       if (idx == null) return;
       const month = addMonths(state.timeline.start, idx);
@@ -1427,7 +1576,7 @@ function renderGanttExtraFilters() {
   const panel = document.getElementById("ganttFiltersPanel");
   const toggle = document.getElementById("btnFilterGantt");
   panel.hidden = !ganttFiltersOpen;
-  toggle.innerHTML = `Filtros <span class="filter-arrow">${ganttFiltersOpen ? "▴" : "▾"}</span>`;
+  setFilterToggleButton(toggle, ganttFiltersOpen);
 
   renderDashboardFilterChips(
     document.getElementById("ganttCategoryChips"),
@@ -1479,14 +1628,24 @@ function openStageDialog(projectId, stageId = null, forcedStart = null) {
   }
   const project = state.projects.find((p) => p.id === projectId);
   if (!project) return;
+  if (!stageId && isIncubatedProject(project)) {
+    alert("Projetos com status INCUBADO não permitem inclusão de etapas.");
+    return;
+  }
+  const suggestedStageId = stageId ? "" : getNextAvailableStageIdForProject(project);
+  if (!stageId && !suggestedStageId) {
+    alert("Todas as etapas cadastradas já foram adicionadas neste projeto.");
+    return;
+  }
   const stage = stageId ? project.stages.find((s) => s.id === stageId) : null;
   const dialog = document.getElementById("stageDialog");
   const stageSelect = document.getElementById("stageTypeSelect");
   const startMonthSelect = document.getElementById("stageStartMonth");
   const monthTemplate = document.getElementById("stageMonthOptionsTpl");
+  const selectedStageId = stage?.stageId || suggestedStageId || state.settings.stages[0]?.id || "";
 
   stageSelect.innerHTML = state.settings.stages
-    .map((st) => `<option value="${st.id}" ${st.id === (stage?.stageId || state.settings.stages[0]?.id) ? "selected" : ""}>${escapeHtml(st.name)}</option>`)
+    .map((st) => `<option value="${st.id}" ${st.id === selectedStageId ? "selected" : ""}>${escapeHtml(st.name)}</option>`)
     .join("");
   if (startMonthSelect && monthTemplate) startMonthSelect.innerHTML = monthTemplate.innerHTML;
 
@@ -1717,7 +1876,7 @@ function renderProjectsTools() {
   const panel = document.getElementById("projectFiltersPanel");
   const toggle = document.getElementById("btnFilterProjects");
   panel.hidden = !projectFiltersOpen;
-  toggle.innerHTML = `Filtros <span class="filter-arrow">${projectFiltersOpen ? "▴" : "▾"}</span>`;
+  setFilterToggleButton(toggle, projectFiltersOpen);
 
   const years = [...new Set(state.projects.map((p) => getProjectYear(p)).filter((y) => y > 0))].sort((a, b) => a - b);
   const allActive = selectedProjectYears.size === 0;
@@ -2225,6 +2384,7 @@ function openProjectDialog(projectId = null) {
   stageWrap.innerHTML = "";
   const stages = project?.stages?.length ? project.stages : [];
   stages.forEach((stage) => stageWrap.appendChild(buildStageRow(stage)));
+  updateProjectStageAddButtonState();
   dialog.showModal();
 }
 
@@ -2289,15 +2449,18 @@ function collectProjectForm() {
   };
 }
 
-function buildStageRow(stage = null) {
+function buildStageRow(stage = null, options = {}) {
   const tpl = document.getElementById("stageRowTpl");
   const row = tpl.content.firstElementChild.cloneNode(true);
   row.dataset.id = stage?.id || uid();
+  const preferredStageId = String(options?.preferredStageId || "").trim();
+  const selectedStageId = stage?.stageId || preferredStageId || state.settings.stages[0]?.id || "";
 
   const select = row.querySelector('[data-field="stageId"]');
   select.innerHTML = state.settings.stages
-    .map((st) => `<option value="${st.id}" ${st.id === (stage?.stageId || state.settings.stages[0]?.id) ? "selected" : ""}>${escapeHtml(st.name)}</option>`)
+    .map((st) => `<option value="${st.id}" ${st.id === selectedStageId ? "selected" : ""}>${escapeHtml(st.name)}</option>`)
     .join("");
+  select.addEventListener("change", updateProjectStageAddButtonState);
 
   const startMonthSelect = row.querySelector('[data-field="startMonth"]');
   const startYearSelect = row.querySelector('[data-field="startYear"]');
@@ -2316,7 +2479,10 @@ function buildStageRow(stage = null) {
   });
   updateStageRowMonthLabels(row);
 
-  row.querySelector("[data-remove]").addEventListener("click", () => row.remove());
+  row.querySelector("[data-remove]").addEventListener("click", () => {
+    row.remove();
+    updateProjectStageAddButtonState();
+  });
   return row;
 }
 
@@ -3260,6 +3426,15 @@ function monthLabel(isoMonth) {
   const labels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
   const [y, m] = isoMonth.split("-");
   return `${labels[Number(m) - 1]} ${String(y).slice(2)}`;
+}
+
+function monthLabelParts(isoMonth) {
+  const labels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+  const [y, m] = String(isoMonth || "").split("-");
+  return {
+    month: labels[Math.max(0, Number(m) - 1)] || "",
+    year: String(y || "").slice(2)
+  };
 }
 
 function monthHoverLabel(isoMonth) {
