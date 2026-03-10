@@ -1376,14 +1376,10 @@ function renderGantt() {
   list.forEach((project) => {
     html += `<div class="gantt-row" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
     html += `<div class="g-left">
-      ${
-        editable
-          ? `<button type="button" class="g-open" data-open-project="${project.id}">`
-          : '<span class="g-open g-open-readonly">'
-      }
+      <button type="button" class="g-open ${editable ? "" : "g-open-readonly"}" data-open-project="${project.id}">
         <span class="g-code">${escapeHtml(project.code || "")}</span>
         <span class="g-title">${escapeHtml(project.title)}</span>
-      ${editable ? "</button>" : "</span>"}
+      </button>
       ${editable ? `<button type="button" class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
     </div>`;
 
@@ -1446,8 +1442,6 @@ function renderGantt() {
   const headEl = container.querySelector(".gantt-head");
   if (ganttEl && headEl) ganttEl.style.setProperty("--g-current-top", `${headEl.offsetHeight}px`);
 
-  if (!editable) return;
-
   container.querySelectorAll("[data-open-project]").forEach((el) => {
     el.addEventListener("click", (event) => {
       event.preventDefault();
@@ -1460,6 +1454,10 @@ function renderGantt() {
     el.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      if (!canEditContent()) {
+        alert("Perfil LEITOR possui apenas visualização.");
+        return;
+      }
       openStageDialog(el.dataset.addStage);
     });
   });
@@ -1468,6 +1466,10 @@ function renderGantt() {
     bar.addEventListener("click", (event) => {
       event.stopPropagation();
       if (Date.now() < suppressLineClickUntil) return;
+      if (!canEditContent()) {
+        alert("Perfil LEITOR possui apenas visualização.");
+        return;
+      }
       openStageDialog(bar.dataset.project, bar.dataset.stage);
     });
     bar.addEventListener("mousedown", (event) => {
@@ -1481,6 +1483,10 @@ function renderGantt() {
   container.querySelectorAll(".release-stage-bar").forEach((bar) => {
     bar.addEventListener("dblclick", (event) => {
       event.stopPropagation();
+      if (!canEditContent()) {
+        alert("Perfil LEITOR possui apenas visualização.");
+        return;
+      }
       openReleaseDateEditor(bar.dataset.releaseProject);
     });
     bar.addEventListener("mousedown", (event) => {
@@ -1499,6 +1505,10 @@ function renderGantt() {
     line.addEventListener("click", (event) => {
       if (Date.now() < suppressLineClickUntil) return;
       if (event.target instanceof Element && event.target.closest(".stage-bar, .release-stage-bar")) return;
+      if (!canEditContent()) {
+        alert("Perfil LEITOR possui apenas visualização.");
+        return;
+      }
       const project = state.projects.find((item) => item.id === projectId);
       if (!project) return;
       const idx = monthIndexFromLinePointer(line, event);
