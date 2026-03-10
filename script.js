@@ -120,6 +120,7 @@ let supabaseBaseState = null;
 let currentThemePreference = "system";
 let systemThemeMediaQuery = null;
 let pendingGanttMeasureRetry = false;
+let ganttInlineActionsBound = false;
 const ALLOWED_TABS = new Set(["dashboard", "cronograma", "projetos", "usuarios", "configuracoes"]);
 const FIELD_TO_SETTINGS_KEY = {
   category: "categories",
@@ -247,6 +248,8 @@ function openTab(tab) {
 }
 
 function bindGlobalActions() {
+  bindGanttInlineActions();
+
   document.getElementById("btnNewProject").addEventListener("click", () => {
     if (!canEditContent()) {
       alert("Perfil LEITOR possui apenas visualização.");
@@ -333,6 +336,103 @@ function bindGlobalActions() {
     renderProjectsTools();
     renderProjectsTable();
   });
+}
+
+function bindGanttInlineActions() {
+  if (ganttInlineActionsBound) return;
+  ganttInlineActionsBound = true;
+  window.__originaisGantt = {
+    openProject(event) {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      const current = event?.currentTarget;
+      const projectId = current?.dataset?.openProject;
+      if (!projectId) return;
+      openProjectDialog(projectId);
+    },
+    addStage(event) {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      const current = event?.currentTarget;
+      const projectId = current?.dataset?.addStage;
+      if (!projectId) return;
+      if (!canEditContent()) {
+        alert("Perfil LEITOR possui apenas visualização.");
+        return;
+      }
+      openStageDialog(projectId);
+    },
+    stageClick(event) {
+      event?.stopPropagation?.();
+      if (Date.now() < suppressLineClickUntil) return;
+      const current = event?.currentTarget;
+      const projectId = current?.dataset?.project;
+      const stageId = current?.dataset?.stage;
+      if (!projectId || !stageId) return;
+      if (!canEditContent()) {
+        alert("Perfil LEITOR possui apenas visualização.");
+        return;
+      }
+      openStageDialog(projectId, stageId);
+    },
+    stageMouseDown(event) {
+      if (!canEditContent()) return;
+      if (event?.button !== 0) return;
+      const current = event?.currentTarget;
+      if (!(current instanceof Element)) return;
+      const target = event?.target instanceof Element ? event.target : null;
+      const handle = target?.closest?.("[data-resize]");
+      startStageDrag(event, current, handle?.dataset?.resize || "move");
+    },
+    releaseDblClick(event) {
+      event?.stopPropagation?.();
+      const current = event?.currentTarget;
+      const projectId = current?.dataset?.releaseProject;
+      if (!projectId) return;
+      if (!canEditContent()) {
+        alert("Perfil LEITOR possui apenas visualização.");
+        return;
+      }
+      openReleaseDateEditor(projectId);
+    },
+    releaseMouseDown(event) {
+      if (!canEditContent()) return;
+      if (event?.button !== 0) return;
+      event?.stopPropagation?.();
+      const current = event?.currentTarget;
+      if (!(current instanceof Element)) return;
+      startReleaseDrag(event, current);
+    },
+    lineMove(event) {
+      const current = event?.currentTarget;
+      if (!(current instanceof Element)) return;
+      renderStageGhost(current, event);
+    },
+    lineLeave(event) {
+      const current = event?.currentTarget;
+      if (!(current instanceof Element)) return;
+      removeStageGhost(current);
+    },
+    lineClick(event) {
+      if (Date.now() < suppressLineClickUntil) return;
+      const current = event?.currentTarget;
+      if (!(current instanceof Element)) return;
+      const target = event?.target instanceof Element ? event.target : null;
+      if (target?.closest(".stage-bar, .release-stage-bar")) return;
+      if (!canEditContent()) {
+        alert("Perfil LEITOR possui apenas visualização.");
+        return;
+      }
+      const projectId = current.dataset?.lineProject;
+      if (!projectId) return;
+      const project = state.projects.find((item) => item.id === projectId);
+      if (!project) return;
+      const idx = monthIndexFromLinePointer(current, event);
+      if (idx == null) return;
+      const month = addMonths(state.timeline.start, idx);
+      openStageDialog(projectId, null, month);
+    }
+  };
 }
 
 function bindAuthActions() {
@@ -1376,14 +1476,18 @@ function renderGantt() {
   list.forEach((project) => {
     html += `<div class="gantt-row" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
     html += `<div class="g-left">
-      <button type="button" class="g-open ${editable ? "" : "g-open-readonly"}" data-open-project="${project.id}">
+      <button type="button" class="g-open ${editable ? "" : "g-open-readonly"}" data-open-project="${project.id}" onclick="window.__originaisGantt && window.__originaisGantt.openProject(event)">
         <span class="g-code">${escapeHtml(project.code || "")}</span>
         <span class="g-title">${escapeHtml(project.title)}</span>
       </button>
-      ${editable ? `<button type="button" class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
+      ${
+        editable
+          ? `<button type="button" class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa" onclick="window.__originaisGantt && window.__originaisGantt.addStage(event)">+</button>`
+          : ""
+      }
     </div>`;
 
-    html += `<div class="g-line" data-line-project="${project.id}">`;
+    html += `<div class="g-line" data-line-project="${project.id}" onmousemove="window.__originaisGantt && window.__originaisGantt.lineMove(event)" onmouseleave="window.__originaisGantt && window.__originaisGantt.lineLeave(event)" onclick="window.__originaisGantt && window.__originaisGantt.lineClick(event)">`;
     months.forEach((m, idx) => {
       if (idx > 0 && String(m).endsWith("-01")) {
         html += `<div class="g-year-divider" style="left: calc(${idx} * var(--month-width));" aria-hidden="true"></div>`;
@@ -1408,7 +1512,7 @@ function renderGantt() {
       const stageTitle = `${stageLabel}: ${monthHoverLabel(st.start)} - ${monthHoverLabel(st.end)}`;
       const selected = selectedStageRef && selectedStageRef.projectId === project.id && selectedStageRef.stageId === st.id;
 
-      html += `<div class="stage-bar ${selected ? "selected" : ""}" style="left: calc(${visStart} * var(--month-width)); width: calc(${width} * var(--month-width) - 2px); background:${color}" data-project="${project.id}" data-stage="${st.id}" title="${escapeHtml(stageTitle)}">
+      html += `<div class="stage-bar ${selected ? "selected" : ""}" style="left: calc(${visStart} * var(--month-width)); width: calc(${width} * var(--month-width) - 2px); background:${color}" data-project="${project.id}" data-stage="${st.id}" title="${escapeHtml(stageTitle)}" onclick="window.__originaisGantt && window.__originaisGantt.stageClick(event)" onmousedown="window.__originaisGantt && window.__originaisGantt.stageMouseDown(event)">
         <span class="label">${escapeHtml(stageLabel)}</span>
         <span class="stage-handle left" data-resize="left"></span>
         <span class="stage-handle right" data-resize="right"></span>
@@ -1419,7 +1523,7 @@ function renderGantt() {
     if (releaseMarker) {
       html += `<div class="release-stage-bar" style="left: calc(${releaseMarker.offsetMonths} * var(--month-width)); width: calc(1 * var(--month-width) - 2px);" data-release-project="${project.id}" title="Lançamento: ${escapeHtml(
         releaseMarker.label
-      )}">
+      )}" ondblclick="window.__originaisGantt && window.__originaisGantt.releaseDblClick(event)" onmousedown="window.__originaisGantt && window.__originaisGantt.releaseMouseDown(event)">
         <span class="label">LAN</span>
         <span class="stage-handle left"></span>
         <span class="stage-handle right"></span>
@@ -1442,81 +1546,6 @@ function renderGantt() {
   const headEl = container.querySelector(".gantt-head");
   if (ganttEl && headEl) ganttEl.style.setProperty("--g-current-top", `${headEl.offsetHeight}px`);
 
-  container.querySelectorAll("[data-open-project]").forEach((el) => {
-    el.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      openProjectDialog(el.dataset.openProject);
-    });
-  });
-
-  container.querySelectorAll("[data-add-stage]").forEach((el) => {
-    el.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!canEditContent()) {
-        alert("Perfil LEITOR possui apenas visualização.");
-        return;
-      }
-      openStageDialog(el.dataset.addStage);
-    });
-  });
-
-  container.querySelectorAll(".stage-bar").forEach((bar) => {
-    bar.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (Date.now() < suppressLineClickUntil) return;
-      if (!canEditContent()) {
-        alert("Perfil LEITOR possui apenas visualização.");
-        return;
-      }
-      openStageDialog(bar.dataset.project, bar.dataset.stage);
-    });
-    bar.addEventListener("mousedown", (event) => {
-      if (event.button !== 0) return;
-      const target = event.target instanceof Element ? event.target : null;
-      const handle = target?.closest("[data-resize]");
-      startStageDrag(event, bar, handle?.dataset.resize || "move");
-    });
-  });
-
-  container.querySelectorAll(".release-stage-bar").forEach((bar) => {
-    bar.addEventListener("dblclick", (event) => {
-      event.stopPropagation();
-      if (!canEditContent()) {
-        alert("Perfil LEITOR possui apenas visualização.");
-        return;
-      }
-      openReleaseDateEditor(bar.dataset.releaseProject);
-    });
-    bar.addEventListener("mousedown", (event) => {
-      if (event.button !== 0) return;
-      event.stopPropagation();
-      startReleaseDrag(event, bar);
-    });
-  });
-
-  container.querySelectorAll(".g-line").forEach((line) => {
-    const projectId = line.dataset.lineProject;
-    line.addEventListener("mousemove", (event) => {
-      renderStageGhost(line, event);
-    });
-    line.addEventListener("mouseleave", () => removeStageGhost(line));
-    line.addEventListener("click", (event) => {
-      if (Date.now() < suppressLineClickUntil) return;
-      if (event.target instanceof Element && event.target.closest(".stage-bar, .release-stage-bar")) return;
-      if (!canEditContent()) {
-        alert("Perfil LEITOR possui apenas visualização.");
-        return;
-      }
-      const project = state.projects.find((item) => item.id === projectId);
-      if (!project) return;
-      const idx = monthIndexFromLinePointer(line, event);
-      if (idx == null) return;
-      const month = addMonths(state.timeline.start, idx);
-      openStageDialog(projectId, null, month);
-    });
-  });
 }
 
 function renderTimelineYearChips() {
