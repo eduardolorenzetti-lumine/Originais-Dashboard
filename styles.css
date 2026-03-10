@@ -1020,7 +1020,7 @@ textarea {
 }
 
 .gantt-row .g-left {
-  min-height: 48px;
+  min-height: 42px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1040,12 +1040,12 @@ textarea {
 
 .g-code {
   font-size: 0.62rem;
-  color: color-mix(in srgb, var(--text) 72%, #334155 28%);
+  color: color-mix(in srgb, var(--text) 64%, #64748b 36%);
   white-space: nowrap;
   background: color-mix(in srgb, var(--surface-2) 95%, #ffffff 5%);
   border: 1px solid color-mix(in srgb, var(--line) 86%, #cbd5e1 14%);
   border-radius: 4px;
-  padding: 1px 6px;
+  padding: 2px 8px;
   font-weight: 650;
   font-family: "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-variant-numeric: slashed-zero tabular-nums;
@@ -1062,7 +1062,7 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: calc(100% - 36px);
+  max-width: calc(100% - 26px);
 }
 
 .g-open:hover .g-title,
@@ -1072,14 +1072,26 @@ textarea {
 
 .g-add-stage {
   margin-left: auto;
-  width: 24px;
-  height: 24px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--accent) 24%, var(--surface));
-  color: var(--text);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--accent) 76%, #000 24%);
   font-weight: 700;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.gantt-row:hover .g-add-stage,
+.g-left:focus-within .g-add-stage {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .gantt-row.is-incubated .g-left {

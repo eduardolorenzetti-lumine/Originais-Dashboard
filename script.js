@@ -1396,13 +1396,13 @@ function renderGantt() {
     html += `<div class="g-left">
       ${
         editable
-          ? `<button class="g-open" data-open-project="${project.id}">`
+          ? `<button type="button" class="g-open" data-open-project="${project.id}">`
           : '<span class="g-open g-open-readonly">'
       }
         <span class="g-code">${escapeHtml(project.code || "")}</span>
         <span class="g-title">${escapeHtml(project.title)}</span>
       ${editable ? "</button>" : "</span>"}
-      ${editable && !incubated ? `<button class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
+      ${editable && !incubated ? `<button type="button" class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
     </div>`;
 
     html += `<div class="g-line" data-line-project="${project.id}" data-incubated="${incubated ? "1" : "0"}">`;
@@ -1458,23 +1458,48 @@ function renderGantt() {
   const headEl = container.querySelector(".gantt-head");
   if (ganttEl && headEl) ganttEl.style.setProperty("--g-current-top", `${headEl.offsetHeight}px`);
 
-  if (!editable) return;
+  if (!editable) {
+    container.onclick = null;
+    return;
+  }
 
-  container.querySelectorAll("[data-open-project]").forEach((el) => {
-    el.addEventListener("click", () => openProjectDialog(el.dataset.openProject));
-  });
-
-  container.querySelectorAll("[data-add-stage]").forEach((el) => {
-    el.addEventListener("click", () => {
-      const project = state.projects.find((item) => item.id === el.dataset.addStage);
+  container.onclick = (event) => {
+    const addButton = event.target.closest("[data-add-stage]");
+    if (addButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      const project = state.projects.find((item) => item.id === addButton.dataset.addStage);
       if (!project) return;
       if (isIncubatedProject(project)) {
         alert("Projetos com status INCUBADO não permitem inclusão de etapas.");
         return;
       }
-      openStageDialog(el.dataset.addStage);
-    });
-  });
+      openStageDialog(addButton.dataset.addStage);
+      return;
+    }
+
+    const openButton = event.target.closest("[data-open-project]");
+    if (openButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      openProjectDialog(openButton.dataset.openProject);
+      return;
+    }
+
+    if (event.target.closest(".stage-bar, .release-stage-bar")) return;
+    const line = event.target.closest(".g-line");
+    if (!line) return;
+
+    if (Date.now() < suppressLineClickUntil) return;
+    const projectId = line.dataset.lineProject;
+    const project = state.projects.find((item) => item.id === projectId);
+    if (!project) return;
+    if (isIncubatedProject(project)) return;
+    const idx = monthIndexFromLinePointer(line, event);
+    if (idx == null) return;
+    const month = addMonths(state.timeline.start, idx);
+    openStageDialog(projectId, null, month);
+  };
 
   container.querySelectorAll(".stage-bar").forEach((bar) => {
     bar.addEventListener("click", () => {
@@ -1502,7 +1527,6 @@ function renderGantt() {
   });
 
   container.querySelectorAll(".g-line").forEach((line) => {
-    const projectId = line.dataset.lineProject;
     const incubated = line.dataset.incubated === "1";
     line.addEventListener("mousemove", (event) => {
       if (incubated) {
@@ -1512,17 +1536,6 @@ function renderGantt() {
       renderStageGhost(line, event);
     });
     line.addEventListener("mouseleave", () => removeStageGhost(line));
-    line.addEventListener("click", (event) => {
-      if (Date.now() < suppressLineClickUntil) return;
-      if (event.target.closest(".stage-bar, .release-stage-bar")) return;
-      const project = state.projects.find((item) => item.id === projectId);
-      if (!project) return;
-      if (isIncubatedProject(project)) return;
-      const idx = monthIndexFromLinePointer(line, event);
-      if (idx == null) return;
-      const month = addMonths(state.timeline.start, idx);
-      openStageDialog(projectId, null, month);
-    });
   });
 }
 
