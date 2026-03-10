@@ -430,20 +430,24 @@ function isAuthenticated() {
 
 function getCurrentUserRole() {
   const user = getCurrentUser();
-  return String(user?.role || "").toUpperCase();
+  return String(user?.role || "")
+    .trim()
+    .toUpperCase();
 }
 
 function canManageUsers() {
-  return getCurrentUserRole() === "ADMIN";
+  const role = getCurrentUserRole();
+  return role === "ADMIN" || role.includes("ADMIN");
 }
 
 function canEditContent() {
   const role = getCurrentUserRole();
-  return role === "ADMIN" || role === "EDITOR";
+  return role === "ADMIN" || role === "EDITOR" || role.includes("ADMIN") || role.includes("EDIT");
 }
 
 function canViewUsers() {
-  return getCurrentUserRole() === "ADMIN";
+  const role = getCurrentUserRole();
+  return role === "ADMIN" || role.includes("ADMIN");
 }
 
 function persistSessionUser() {

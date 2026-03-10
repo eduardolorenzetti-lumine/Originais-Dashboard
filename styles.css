@@ -1086,6 +1086,7 @@ textarea {
   opacity: 0;
   pointer-events: none;
   transition: opacity 120ms ease;
+  cursor: pointer;
 }
 
 .gantt-row:hover .g-add-stage,
