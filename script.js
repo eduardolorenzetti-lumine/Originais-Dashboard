@@ -1248,14 +1248,6 @@ function setFilterToggleButton(button, isOpen) {
   button.innerHTML = `Filtros <span class="filter-arrow${isOpen ? " up" : ""}" aria-hidden="true"></span>`;
 }
 
-function isIncubatedStatusValue(statusValue) {
-  return normalizeSearchText(statusValue).includes("incubad");
-}
-
-function isIncubatedProject(project) {
-  return isIncubatedStatusValue(getProjectField(project, "status"));
-}
-
 function getUsedStageIdsFromProject(project) {
   return new Set((project?.stages || []).map((stage) => String(stage?.stageId || "").trim()).filter(Boolean));
 }
@@ -1382,8 +1374,7 @@ function renderGantt() {
   html += "</div>";
 
   list.forEach((project) => {
-    const incubated = isIncubatedProject(project);
-    html += `<div class="gantt-row ${incubated ? "is-incubated" : ""}" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
+    html += `<div class="gantt-row" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
     html += `<div class="g-left">
       ${
         editable
