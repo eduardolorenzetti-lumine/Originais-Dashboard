@@ -1392,7 +1392,6 @@ function renderGantt() {
 
   list.forEach((project) => {
     const incubated = isIncubatedProject(project);
-    const canAddStage = canProjectAddMoreStages(project);
     html += `<div class="gantt-row ${incubated ? "is-incubated" : ""}" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
     html += `<div class="g-left">
       ${
@@ -1403,15 +1402,10 @@ function renderGantt() {
         <span class="g-code">${escapeHtml(project.code || "")}</span>
         <span class="g-title">${escapeHtml(project.title)}</span>
       ${editable ? "</button>" : "</span>"}
-      <span class="g-actions">
-        ${editable && !incubated && canAddStage ? `<button class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
-        ${editable ? `<button class="g-view-stage" data-open-project="${project.id}" title="Abrir projeto" aria-label="Abrir projeto">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c5.23 0 9.27 4.11 10.73 6.05a1.53 1.53 0 0 1 0 1.9C21.27 14.89 17.23 19 12 19S2.73 14.89 1.27 12.95a1.53 1.53 0 0 1 0-1.9C2.73 9.11 6.77 5 12 5zm0 2C7.8 7 4.37 10.16 3.1 12 4.37 13.84 7.8 17 12 17s7.63-3.16 8.9-5C19.63 10.16 16.2 7 12 7zm0 2.5A2.5 2.5 0 1 1 9.5 12 2.5 2.5 0 0 1 12 9.5z"/></svg>
-        </button>` : ""}
-      </span>
+      ${editable && !incubated ? `<button class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
     </div>`;
 
-    html += `<div class="g-line" data-line-project="${project.id}" data-incubated="${incubated ? "1" : "0"}" data-can-add="${canAddStage ? "1" : "0"}">`;
+    html += `<div class="g-line" data-line-project="${project.id}" data-incubated="${incubated ? "1" : "0"}">`;
     months.forEach((m, idx) => {
       if (idx > 0 && String(m).endsWith("-01")) {
         html += `<div class="g-year-divider" style="left: calc(${idx} * var(--month-width));" aria-hidden="true"></div>`;
@@ -1478,10 +1472,6 @@ function renderGantt() {
         alert("Projetos com status INCUBADO não permitem inclusão de etapas.");
         return;
       }
-      if (!canProjectAddMoreStages(project)) {
-        alert("Todas as etapas cadastradas já foram adicionadas neste projeto.");
-        return;
-      }
       openStageDialog(el.dataset.addStage);
     });
   });
@@ -1514,9 +1504,8 @@ function renderGantt() {
   container.querySelectorAll(".g-line").forEach((line) => {
     const projectId = line.dataset.lineProject;
     const incubated = line.dataset.incubated === "1";
-    const canAdd = line.dataset.canAdd === "1";
     line.addEventListener("mousemove", (event) => {
-      if (incubated || !canAdd) {
+      if (incubated) {
         removeStageGhost(line);
         return;
       }
@@ -1529,10 +1518,6 @@ function renderGantt() {
       const project = state.projects.find((item) => item.id === projectId);
       if (!project) return;
       if (isIncubatedProject(project)) return;
-      if (!canProjectAddMoreStages(project)) {
-        alert("Todas as etapas cadastradas já foram adicionadas neste projeto.");
-        return;
-      }
       const idx = monthIndexFromLinePointer(line, event);
       if (idx == null) return;
       const month = addMonths(state.timeline.start, idx);
@@ -1632,11 +1617,7 @@ function openStageDialog(projectId, stageId = null, forcedStart = null) {
     alert("Projetos com status INCUBADO não permitem inclusão de etapas.");
     return;
   }
-  const suggestedStageId = stageId ? "" : getNextAvailableStageIdForProject(project);
-  if (!stageId && !suggestedStageId) {
-    alert("Todas as etapas cadastradas já foram adicionadas neste projeto.");
-    return;
-  }
+  const suggestedStageId = stageId ? "" : getNextAvailableStageIdForProject(project) || state.settings.stages[0]?.id || "";
   const stage = stageId ? project.stages.find((s) => s.id === stageId) : null;
   const dialog = document.getElementById("stageDialog");
   const stageSelect = document.getElementById("stageTypeSelect");
@@ -2455,6 +2436,10 @@ function buildStageRow(stage = null, options = {}) {
   row.dataset.id = stage?.id || uid();
   const preferredStageId = String(options?.preferredStageId || "").trim();
   const selectedStageId = stage?.stageId || preferredStageId || state.settings.stages[0]?.id || "";
+  const currentIsoMonth = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  })();
 
   const select = row.querySelector('[data-field="stageId"]');
   select.innerHTML = state.settings.stages
@@ -2468,8 +2453,8 @@ function buildStageRow(stage = null, options = {}) {
   const monthTemplate = document.getElementById("stageMonthOptionsTpl");
 
   if (startMonthSelect && monthTemplate) startMonthSelect.innerHTML = monthTemplate.innerHTML;
-  populateStageYearSelect(startYearSelect, stage?.start || state.timeline.start);
-  const defaultStart = stage?.start || state.timeline.start;
+  const defaultStart = stage?.start || currentIsoMonth;
+  populateStageYearSelect(startYearSelect, defaultStart);
   setStageRowRange(row, defaultStart, stage?.end || defaultStart);
 
   [startMonthSelect, startYearSelect, durationInput].forEach((input) => {
