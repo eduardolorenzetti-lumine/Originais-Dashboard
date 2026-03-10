@@ -401,8 +401,23 @@ body {
 
 .filter-arrow {
   display: inline-block;
-  margin-left: 4px;
-  font-size: 0.74rem;
+  width: 8px;
+  height: 8px;
+  margin-left: 8px;
+  border-right: 1.8px solid currentColor;
+  border-bottom: 1.8px solid currentColor;
+  transform: rotate(45deg) translateY(-1px);
+  transition: transform 140ms ease;
+}
+
+.filter-arrow.up {
+  transform: rotate(-135deg) translateY(-1px);
+}
+
+.filter-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 14px;
 }
 
 .chips {
@@ -483,14 +498,21 @@ textarea {
 }
 
 .dashboard-top-controls {
-  display: grid;
+  display: flex;
+  justify-content: space-between;
   gap: 10px;
-  align-items: start;
+  align-items: center;
+  flex-wrap: wrap;
   margin-bottom: 10px;
 }
 
-#dashboardFiltersToggle {
-  width: fit-content;
+.dashboard-top-controls .year-inline {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.dashboard-top-controls .filter-toggle-btn {
+  margin-left: auto;
 }
 
 .dashboard-filters {
@@ -848,14 +870,45 @@ textarea {
 .table-tools {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
-  align-items: end;
+  flex-wrap: nowrap;
+  align-items: center;
   margin-bottom: 10px;
+  min-width: 0;
 }
 
 #projectSearch {
-  width: min(620px, 100%);
-  max-width: 100%;
+  width: auto;
+  max-width: none;
+  min-width: 220px;
+  flex: 1 1 420px;
+}
+
+.project-tools-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.project-import-btn,
+.project-new-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+}
+
+.project-import-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.project-new-btn .plus {
+  display: inline-block;
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1;
 }
 
 .projects-top-sticky {
@@ -944,10 +997,25 @@ textarea {
 .g-month {
   border-right: 1px solid var(--month-grid);
   border-bottom: 1px solid var(--line);
-  font-size: 0.56rem;
+  font-size: 0.62rem;
   color: var(--muted);
   text-align: center;
-  padding: 8px 2px;
+  padding: 7px 2px 6px;
+  display: grid;
+  place-items: center;
+  line-height: 1.05;
+  gap: 2px;
+}
+
+.g-month .m-name {
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.g-month .m-year {
+  font-size: 0.58rem;
+  font-weight: 500;
 }
 
 .g-month.year-separator {
@@ -974,9 +1042,14 @@ textarea {
 }
 
 .g-code {
-  font-size: 0.67rem;
-  color: var(--muted);
+  font-size: 0.65rem;
+  color: color-mix(in srgb, var(--text) 78%, #334155 22%);
   white-space: nowrap;
+  background: color-mix(in srgb, var(--surface-2) 86%, #9ca3af 14%);
+  border: 1px solid color-mix(in srgb, var(--line) 72%, #9ca3af 28%);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-weight: 600;
 }
 
 .g-open {
@@ -986,9 +1059,9 @@ textarea {
   text-align: left;
   cursor: pointer;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  max-width: calc(100% - 34px);
+  max-width: calc(100% - 68px);
 }
 
 .g-open:hover .g-title,
@@ -997,7 +1070,6 @@ textarea {
 }
 
 .g-add-stage {
-  margin-left: auto;
   width: 24px;
   height: 24px;
   flex-shrink: 0;
@@ -1006,6 +1078,45 @@ textarea {
   background: color-mix(in srgb, var(--accent) 24%, var(--surface));
   color: var(--text);
   font-weight: 700;
+}
+
+.g-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.g-view-stage {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-2) 84%, var(--surface));
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.g-view-stage svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.g-view-stage:hover {
+  color: var(--text);
+}
+
+.gantt-row.is-incubated .g-left {
+  background: color-mix(in srgb, var(--surface-2) 86%, #9ca3af 14%);
+}
+
+.gantt-row.is-incubated .g-line {
+  background-color: color-mix(in srgb, var(--surface-2) 92%, #9ca3af 8%);
 }
 
 .g-line {
@@ -1641,6 +1752,11 @@ dialog::backdrop {
   color: var(--text);
 }
 
+.stage-row [data-field="endPreview"],
+#stageEndPreview {
+  color: var(--muted);
+}
+
 .stage-row .month-pt-label {
   grid-column: 1 / -1;
   margin-top: -2px;
@@ -1759,6 +1875,14 @@ textarea:focus,
   }
   .filter-row {
     grid-template-columns: 1fr;
+  }
+  .table-tools {
+    flex-wrap: wrap;
+  }
+  .project-tools-actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
   }
   .timeline-toolbar {
     grid-template-columns: 1fr;
