@@ -1266,6 +1266,11 @@ function normalizeSearchText(value) {
     .trim();
 }
 
+function isSkuWarningStatus(statusValue) {
+  const normalized = normalizeSearchText(statusValue);
+  return normalized.includes("incubad") || normalized.includes("backlog");
+}
+
 function renderProjectPickerFilter(container, selectedSet, scopeKey, onChange) {
   if (!container) return;
   const allProjects = sortedProjects(state.projects, "desc").map((project) => ({
@@ -1585,15 +1590,17 @@ function renderGantt() {
   html += "</div>";
 
   list.forEach((project) => {
+    const fullTitle = String(project.title || "").trim();
+    const skuClass = isSkuWarningStatus(getProjectField(project, "status")) ? "g-code status-warning" : "g-code";
     html += `<div class="gantt-row" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
     html += `<div class="g-left">
       ${
         editable
-          ? `<button type="button" class="g-open" data-open-project="${project.id}">`
-          : '<span class="g-open g-open-readonly">'
+          ? `<button type="button" class="g-open" data-open-project="${project.id}" data-project-title="${escapeHtml(fullTitle)}">`
+          : `<span class="g-open g-open-readonly" data-project-title="${escapeHtml(fullTitle)}">`
       }
-        <span class="g-code">${escapeHtml(project.code || "")}</span>
-        <span class="g-title">${escapeHtml(project.title)}</span>
+        <span class="${skuClass}">${escapeHtml(project.code || "")}</span>
+        <span class="g-title" title="${escapeHtml(fullTitle)}">${escapeHtml(fullTitle)}</span>
       ${editable ? "</button>" : "</span>"}
       ${editable ? `<button type="button" class="g-add-stage" data-add-stage="${project.id}" title="Adicionar etapa">+</button>` : ""}
     </div>`;

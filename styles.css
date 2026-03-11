@@ -1020,10 +1020,12 @@ textarea {
 }
 
 .gantt-row .g-left {
-  min-height: 42px;
+  min-height: 34px;
   display: flex;
   align-items: center;
   gap: 8px;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 
 .gantt-head .g-left {
@@ -1032,7 +1034,8 @@ textarea {
 
 .g-title {
   font-size: 0.78rem;
-  font-weight: 600;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--text) 72%, #64748b 8%);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1040,17 +1043,27 @@ textarea {
 
 .g-code {
   font-size: 0.62rem;
-  color: color-mix(in srgb, var(--text) 64%, #64748b 36%);
+  color: color-mix(in srgb, var(--text) 42%, #ecf4ff 58%);
   white-space: nowrap;
-  background: color-mix(in srgb, var(--surface-2) 95%, #ffffff 5%);
-  border: 1px solid color-mix(in srgb, var(--line) 86%, #cbd5e1 14%);
-  border-radius: 4px;
-  padding: 2px 8px;
+  background: color-mix(in srgb, var(--surface-2) 66%, transparent);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 2px 9px;
   font-weight: 650;
   font-family: "SF Mono", SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-variant-numeric: slashed-zero tabular-nums;
   font-feature-settings: "zero" 1, "tnum" 1;
   letter-spacing: 0.01em;
+}
+
+.g-code.status-warning {
+  color: color-mix(in srgb, #b91c1c 62%, var(--text) 8%);
+  background: color-mix(in srgb, #fecaca 28%, var(--surface-2));
+}
+
+:root[data-theme="dark"] .g-code.status-warning {
+  color: color-mix(in srgb, #b91c1c 62%, var(--text) 8%);
+  background: color-mix(in srgb, #7f1d1d 28%, var(--surface-2));
 }
 
 .g-open {
@@ -1097,7 +1110,7 @@ textarea {
 
 .g-line {
   border-bottom: 1px solid var(--line);
-  min-height: 48px;
+  min-height: 36px;
   position: relative;
   background-image: repeating-linear-gradient(
     to right,
@@ -1171,11 +1184,11 @@ textarea {
 
 .stage-bar {
   position: absolute;
-  top: 8px;
-  height: 26px;
+  top: 6px;
+  height: 20px;
   border-radius: 5px;
   color: var(--text);
-  font-size: 0.65rem;
+  font-size: 0.61rem;
   padding: 3px 8px;
   display: flex;
   justify-content: space-between;
@@ -1189,8 +1202,8 @@ textarea {
 
 .release-stage-bar {
   position: absolute;
-  top: 8px;
-  height: 22px;
+  top: 6px;
+  height: 18px;
   border-radius: 4px;
   color: var(--success);
   font-size: 0.58rem;
@@ -1255,8 +1268,8 @@ textarea {
 
 .stage-ghost {
   position: absolute;
-  top: 8px;
-  height: 26px;
+  top: 6px;
+  height: 20px;
   width: calc(var(--month-width) - 2px);
   border-radius: 5px;
   background: var(--stage-ghost-bg);
