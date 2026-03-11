@@ -1235,6 +1235,7 @@ function renderDashboardExtraFilters() {
 }
 
 function renderDashboardFilterChips(container, values, selectedSet, key, onChange = renderDashboard) {
+  if (!container) return;
   const allActive = selectedSet.size === 0;
   container.innerHTML = [
     `<button class="chip ${allActive ? "active" : ""}" data-filter-key="${key}" data-filter-value="__all">Todos</button>`,
@@ -1524,7 +1525,12 @@ function getProjectYearLabel(project) {
 function renderGantt() {
   const editable = canEditContent();
   renderGanttYearChips();
-  renderGanttExtraFilters();
+  try {
+    renderGanttExtraFilters();
+  } catch (error) {
+    window.__originaisLastGanttError = String(error?.message || error);
+    console.error("[Originais] Falha ao renderizar filtros do cronograma:", error);
+  }
   normalizeTimelineWindow();
   document.getElementById("timelineStart").value = state.timeline.start;
   document.getElementById("timelineEnd").value = state.timeline.end;
@@ -1541,9 +1547,9 @@ function renderGantt() {
   }
 
   const measuredWidth = Number(container.clientWidth || 0);
-  const fallbackWidth = Math.max(Number(document.querySelector(".content")?.clientWidth || 0) - 36, 420);
-  const containerWidth = Math.max(measuredWidth, fallbackWidth);
-  const needsSecondMeasure = measuredWidth < 240 || fallbackWidth - measuredWidth > 180;
+  const parentWidth = Number(container.parentElement?.clientWidth || 0);
+  const containerWidth = measuredWidth > 0 ? measuredWidth : Math.max(parentWidth - 12, 420);
+  const needsSecondMeasure = measuredWidth < 140;
   if (needsSecondMeasure && document.getElementById("cronograma")?.classList.contains("active") && !pendingGanttMeasureRetry) {
     pendingGanttMeasureRetry = true;
     requestAnimationFrame(() => {
@@ -1752,40 +1758,46 @@ function renderGanttYearChips() {
 function renderGanttExtraFilters() {
   const panel = document.getElementById("ganttFiltersPanel");
   const toggle = document.getElementById("btnFilterGantt");
+  if (!panel || !toggle) return;
   panel.hidden = !ganttFiltersOpen;
   setFilterToggleButton(toggle, ganttFiltersOpen);
+  const statusValues = uniq([...(state.settings?.statuses || []), ...state.projects.map((p) => getProjectField(p, "status"))]).filter(Boolean);
+  const categoryValues = uniq([...(state.settings?.categories || []), ...state.projects.map((p) => getProjectField(p, "category"))]).filter(Boolean);
+  const formatValues = uniq([...(state.settings?.formats || []), ...state.projects.map((p) => getProjectField(p, "format"))]).filter(Boolean);
+  const natureValues = uniq([...(state.settings?.natures || []), ...state.projects.map((p) => getProjectField(p, "nature"))]).filter(Boolean);
+  const durationValues = uniq([...(state.settings?.durations || []), ...state.projects.map((p) => getProjectField(p, "duration"))]).filter(Boolean);
 
   renderDashboardFilterChips(
     document.getElementById("ganttStatusChips"),
-    uniq([...state.settings.statuses, ...state.projects.map((p) => getProjectField(p, "status"))]).filter(Boolean),
+    statusValues,
     selectedGanttFilters.statuses,
     "statuses",
     () => renderGantt()
   );
   renderDashboardFilterChips(
     document.getElementById("ganttCategoryChips"),
-    uniq([...state.settings.categories, ...state.projects.map((p) => getProjectField(p, "category"))]).filter(Boolean),
+    categoryValues,
     selectedGanttFilters.categories,
     "categories",
     () => renderGantt()
   );
   renderDashboardFilterChips(
     document.getElementById("ganttFormatChips"),
-    uniq([...state.settings.formats, ...state.projects.map((p) => getProjectField(p, "format"))]).filter(Boolean),
+    formatValues,
     selectedGanttFilters.formats,
     "formats",
     () => renderGantt()
   );
   renderDashboardFilterChips(
     document.getElementById("ganttNatureChips"),
-    uniq([...state.settings.natures, ...state.projects.map((p) => getProjectField(p, "nature"))]).filter(Boolean),
+    natureValues,
     selectedGanttFilters.natures,
     "natures",
     () => renderGantt()
   );
   renderDashboardFilterChips(
     document.getElementById("ganttDurationChips"),
-    uniq([...state.settings.durations, ...state.projects.map((p) => getProjectField(p, "duration"))]).filter(Boolean),
+    durationValues,
     selectedGanttFilters.durations,
     "durations",
     () => renderGantt()
