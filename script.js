@@ -1592,7 +1592,8 @@ function renderGantt() {
   list.forEach((project) => {
     const fullTitle = String(project.title || "").trim();
     const skuClass = isSkuWarningStatus(getProjectField(project, "status")) ? "g-code status-warning" : "g-code";
-    html += `<div class="gantt-row" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
+    const rowClass = isSkuWarningStatus(getProjectField(project, "status")) ? "gantt-row status-warning-row" : "gantt-row";
+    html += `<div class="${rowClass}" style="grid-template-columns:${leftWidth}px ${timelineWidth}px">`;
     html += `<div class="g-left">
       ${
         editable
