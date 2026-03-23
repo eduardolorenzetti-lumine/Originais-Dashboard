@@ -125,6 +125,7 @@ let systemThemeMediaQuery = null;
 let pendingGanttMeasureRetry = false;
 let ganttDelegatedBound = false;
 let ganttGhostActiveLine = null;
+let ganttPanState = null;
 const ALLOWED_TABS = new Set(["dashboard", "cronograma", "projetos", "usuarios", "configuracoes"]);
 const FIELD_TO_SETTINGS_KEY = {
   category: "categories",
@@ -291,6 +292,7 @@ function bindGlobalActions() {
   document.getElementById("timelineForward").addEventListener("click", increaseTimelineWindow);
   document.getElementById("timelineLeft").addEventListener("click", () => panTimeline(-1));
   document.getElementById("timelineRight").addEventListener("click", () => panTimeline(1));
+  document.getElementById("timelineToday").addEventListener("click", centerTimelineOnCurrentMonth);
 
   document.getElementById("projectSearch").addEventListener("input", renderProjectsTable);
   document.getElementById("btnCreateUser").addEventListener("click", () => {
@@ -678,11 +680,7 @@ function applyAuthVisibility() {
     "btnQuickNewProject",
     "btnImportCsv",
     "btnAddConfig",
-    "applyTimeline",
-    "timelineBack",
-    "timelineForward",
-    "timelineLeft",
-    "timelineRight"
+    "applyTimeline"
   ];
   readOnlyControls.forEach((id) => {
     const el = document.getElementById(id);
@@ -1660,10 +1658,63 @@ function renderGantt() {
 
   html += "</div>";
   container.innerHTML = html;
+  container.classList.remove("is-panning");
 
   const ganttEl = container.querySelector(".gantt");
   const headEl = container.querySelector(".gantt-head");
   if (ganttEl && headEl) ganttEl.style.setProperty("--g-current-top", `${headEl.offsetHeight}px`);
+
+  container.onwheel = (event) => {
+    if (event.ctrlKey) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest(".stage-bar, .release-stage-bar, .g-open, .g-add-stage")) return;
+    const isHorizontalGesture = Math.abs(event.deltaX) > Math.abs(event.deltaY);
+    const isShiftScroll = event.shiftKey && Math.abs(event.deltaY) > 0;
+    if (!isHorizontalGesture && !isShiftScroll) return;
+    const deltaRaw = isHorizontalGesture ? event.deltaX : event.deltaY;
+    if (!Number.isFinite(deltaRaw) || Math.abs(deltaRaw) < 6) return;
+    event.preventDefault();
+    const monthWidth = parseFloat(getComputedStyle(container).getPropertyValue("--month-width")) || 46;
+    const step = deltaRaw > 0 ? Math.max(1, Math.round(Math.abs(deltaRaw) / monthWidth)) : -Math.max(1, Math.round(Math.abs(deltaRaw) / monthWidth));
+    shiftTimelineWindow(step, { persist: true, rerender: true });
+  };
+
+  container.onmousedown = (event) => {
+    if (event.button !== 0) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest(".stage-bar, .release-stage-bar, .g-open, .g-add-stage, .stage-handle")) return;
+    const line = target?.closest(".g-line");
+    if (!line) return;
+    const monthWidth = parseFloat(getComputedStyle(container).getPropertyValue("--month-width")) || 46;
+    ganttPanState = {
+      anchorX: event.clientX,
+      monthWidth,
+      moved: false
+    };
+    container.classList.add("is-panning");
+    event.preventDefault();
+  };
+
+  document.onmousemove = (event) => {
+    if (!ganttPanState) return;
+    const deltaMonths = Math.trunc((ganttPanState.anchorX - event.clientX) / ganttPanState.monthWidth);
+    if (!deltaMonths) return;
+    const shifted = shiftTimelineWindow(deltaMonths, { persist: false, rerender: true });
+    if (!shifted) return;
+    container.classList.add("is-panning");
+    ganttPanState.anchorX -= deltaMonths * ganttPanState.monthWidth;
+    ganttPanState.moved = true;
+  };
+
+  document.onmouseup = () => {
+    if (!ganttPanState) return;
+    const didMove = ganttPanState.moved;
+    ganttPanState = null;
+    container.classList.remove("is-panning");
+    if (!didMove) return;
+    suppressLineClickUntil = Date.now() + 250;
+    saveState();
+  };
 
   if (!editable) {
     container.onclick = null;
@@ -2035,8 +2086,38 @@ function removeStageGhost(line) {
   line.querySelector(".stage-ghost")?.remove();
 }
 
+function shiftTimelineWindow(delta, { persist = true, rerender = true } = {}) {
+  if (!Number.isFinite(delta) || delta === 0) return false;
+  normalizeTimelineWindow();
+  state.timeline.start = addMonths(state.timeline.start, delta);
+  state.timeline.end = addMonths(state.timeline.end, delta);
+  document.getElementById("timelineStart").value = state.timeline.start;
+  document.getElementById("timelineEnd").value = state.timeline.end;
+  if (persist) saveState();
+  if (rerender) renderGantt();
+  return true;
+}
+
+function centerTimelineOnMonth(targetMonth, { persist = true } = {}) {
+  if (!isValidMonth(targetMonth)) return;
+  normalizeTimelineWindow();
+  const monthsShown = getTimelineMonthsShown();
+  const offset = Math.floor(monthsShown / 2);
+  state.timeline.start = addMonths(targetMonth, -offset);
+  state.timeline.end = addMonths(state.timeline.start, monthsShown - 1);
+  document.getElementById("timelineStart").value = state.timeline.start;
+  document.getElementById("timelineEnd").value = state.timeline.end;
+  if (persist) saveState();
+  renderGantt();
+}
+
+function centerTimelineOnCurrentMonth() {
+  const now = new Date();
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  centerTimelineOnMonth(currentMonth, { persist: true });
+}
+
 function zoomTimeline(delta) {
-  if (!canEditContent()) return;
   normalizeTimelineWindow();
   const current = getTimelineMonthsShown();
   const next = Math.max(6, Math.min(72, current + delta));
@@ -2059,14 +2140,7 @@ function increaseTimelineWindow() {
 }
 
 function panTimeline(delta) {
-  if (!canEditContent()) return;
-  normalizeTimelineWindow();
-  state.timeline.start = addMonths(state.timeline.start, delta);
-  state.timeline.end = addMonths(state.timeline.end, delta);
-  document.getElementById("timelineStart").value = state.timeline.start;
-  document.getElementById("timelineEnd").value = state.timeline.end;
-  saveState();
-  renderGantt();
+  shiftTimelineWindow(delta, { persist: true, rerender: true });
 }
 
 function renderProjectsTools() {

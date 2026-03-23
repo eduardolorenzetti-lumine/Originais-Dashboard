@@ -950,6 +950,13 @@ textarea {
   max-height: calc(100vh - 250px);
   width: 100%;
   min-width: 0;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.gantt-container.is-panning {
+  cursor: grabbing;
 }
 
 .gantt {
