@@ -187,6 +187,23 @@ function readSupabaseStoredSession() {
   return null;
 }
 
+function clearSupabaseStoredSession() {
+  try {
+    const ref = getSupabaseProjectRef();
+    const storage = window.localStorage;
+    if (!storage) return;
+    const keysToRemove = [];
+    const exactKey = ref ? `sb-${ref}-auth-token` : "";
+    if (exactKey && storage.getItem(exactKey) !== null) keysToRemove.push(exactKey);
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (!key || !/^sb-.*-auth-token$/.test(key)) continue;
+      if (!keysToRemove.includes(key)) keysToRemove.push(key);
+    }
+    keysToRemove.forEach((key) => storage.removeItem(key));
+  } catch (_) {}
+}
+
 function normalizeThemePreference(value) {
   const normalized = String(value || "").trim().toLowerCase();
   return THEME_VALUES.has(normalized) ? normalized : "system";
