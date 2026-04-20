@@ -241,16 +241,15 @@ async function init() {
   applyAuthVisibility();
   ensureAuthSurfaceVisible();
   renderAll();
-  await withTimeout(
-    initializeSupabaseAuth(),
-    1800,
-    () => {
-      console.warn("[Originais] Inicialização do auth excedeu o tempo limite. Seguindo com a tela de login.");
-    }
-  );
-  applyAuthVisibility();
-  ensureAuthSurfaceVisible();
-  renderAll();
+  void initializeSupabaseAuth()
+    .catch((error) => {
+      console.warn("[Originais] Falha na inicialização assíncrona do auth.", error?.message || error);
+    })
+    .finally(() => {
+      applyAuthVisibility();
+      ensureAuthSurfaceVisible();
+      renderAll();
+    });
 }
 
 function bindNavigation() {
