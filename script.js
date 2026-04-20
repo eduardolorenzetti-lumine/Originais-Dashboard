@@ -690,7 +690,17 @@ async function syncCurrentUserFromSupabaseSession({ persistUsers = true } = {}) 
   }
   const cachedUsers = Array.isArray(state.users) ? state.users.slice() : [];
   const cachedAuthorizedUser = cachedUsers.find((user) => normalizeUserEmail(user?.email) === email) || null;
+  let currentSecureUser = null;
   let refreshedUsers = false;
+  try {
+    currentSecureUser = await fetchSecureCurrentUserFromSupabase(email);
+    if (currentSecureUser) {
+      const remainingUsers = cachedUsers.filter((user) => normalizeUserEmail(user?.email) !== email);
+      setManagedUsers([...remainingUsers, currentSecureUser], { persist: persistUsers });
+    }
+  } catch (error) {
+    console.warn("[Originais] Falha ao carregar o usuário atual no Supabase.", error?.message || error);
+  }
   try {
     await refreshSecureUsersFromSupabase({ persist: persistUsers });
     refreshedUsers = true;
@@ -702,7 +712,7 @@ async function syncCurrentUserFromSupabaseSession({ persistUsers = true } = {}) 
   currentUserId = email;
   const current = getCurrentUser();
   if (!current || current.active === false) {
-    if (!refreshedUsers && cachedAuthorizedUser?.active !== false) {
+    if ((!refreshedUsers && cachedAuthorizedUser?.active !== false) || currentSecureUser?.active !== false) {
       clearLoginError();
       return true;
     }
@@ -5474,6 +5484,36 @@ async function fetchSecureUsersFromSupabase() {
     console.warn("[Originais] Primeira leitura de app_users falhou. Tentando novamente.", error?.message || error);
     await wait(450);
     return loadUsers();
+  }
+}
+
+async function fetchSecureCurrentUserFromSupabase(email) {
+  const client = getSupabaseClient();
+  const normalizedEmail = normalizeUserEmail(email);
+  if (!client?.auth || typeof client.from !== "function" || !normalizedEmail) return null;
+  const loadCurrentUser = async () => {
+    const { data, error } = await client
+      .from(SUPABASE_USERS_TABLE)
+      .select("email,name,role,active,invited_at")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    return sanitizeUserForState({
+      id: data.email,
+      email: data.email,
+      name: data.name,
+      role: data.role,
+      active: data.active,
+      invitedAt: data.invited_at
+    });
+  };
+  try {
+    return await loadCurrentUser();
+  } catch (error) {
+    console.warn("[Originais] Primeira leitura do usuário atual em app_users falhou. Tentando novamente.", error?.message || error);
+    await wait(450);
+    return loadCurrentUser();
   }
 }
 
