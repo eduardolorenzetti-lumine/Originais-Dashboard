@@ -236,10 +236,20 @@ async function init() {
   bindDialog();
   bindAuthActions();
   updateLoginModeUi();
-  await initializeSupabaseAuth();
   restoreSessionUser();
   restoreCurrentTab();
   applyAuthVisibility();
+  ensureAuthSurfaceVisible();
+  renderAll();
+  await withTimeout(
+    initializeSupabaseAuth(),
+    1800,
+    () => {
+      console.warn("[Originais] Inicialização do auth excedeu o tempo limite. Seguindo com a tela de login.");
+    }
+  );
+  applyAuthVisibility();
+  ensureAuthSurfaceVisible();
   renderAll();
 }
 
