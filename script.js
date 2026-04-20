@@ -725,12 +725,19 @@ async function initializeSupabaseAuth() {
   const { data, error } = await getSupabaseClient().auth.getSession();
   if (error) {
     console.warn("[Originais] Falha ao obter sessão do Supabase.", error.message || error);
+    applyAuthVisibility();
     return;
   }
   supabaseAuthSession = data.session || null;
-  if (!supabaseAuthSession) return;
+  if (!supabaseAuthSession) {
+    applyAuthVisibility();
+    return;
+  }
   const signedIn = await syncCurrentUserFromSupabaseSession({ persistUsers: true });
-  if (!signedIn) return;
+  if (!signedIn) {
+    applyAuthVisibility();
+    return;
+  }
   persistSessionUser();
 }
 
@@ -818,6 +825,7 @@ function applyAuthVisibility() {
   const appShell = document.getElementById("appShell");
   const profileMenuList = document.getElementById("profileMenuList");
   const profileMenuUser = document.getElementById("profileMenuUser");
+  if (!loginView || !appShell) return;
   const user = getCurrentUser();
   const isAdmin = canManageUsers();
   const canEdit = canEditContent();
@@ -825,8 +833,8 @@ function applyAuthVisibility() {
 
   loginView.hidden = Boolean(user);
   appShell.hidden = !user;
-  profileMenuList.hidden = true;
-  profileMenuUser.textContent = user ? `${user.name || "Usuário"} • ${user.role || "LEITOR"}` : "";
+  if (profileMenuList) profileMenuList.hidden = true;
+  if (profileMenuUser) profileMenuUser.textContent = user ? `${user.name || "Usuário"} • ${user.role || "LEITOR"}` : "";
   const btnCreateUser = document.getElementById("btnCreateUser");
   const btnInviteUser = document.getElementById("btnInviteUser");
   if (btnCreateUser) btnCreateUser.hidden = !isAdmin;
@@ -861,6 +869,16 @@ function applyAuthVisibility() {
     document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === currentTab && !b.hidden));
   }
   updateThemeOptionButtons();
+}
+
+function ensureAuthSurfaceVisible() {
+  const loginView = document.getElementById("loginView");
+  const appShell = document.getElementById("appShell");
+  if (!loginView || !appShell) return;
+  if (!loginView.hidden || !appShell.hidden) return;
+  const user = getCurrentUser();
+  loginView.hidden = Boolean(user);
+  appShell.hidden = !user;
 }
 
 async function logoutCurrentUser() {
@@ -1333,6 +1351,7 @@ function renderAll() {
   renderConfigList();
   applyPtBrLocaleToDateInputs(document);
   applyAuthVisibility();
+  ensureAuthSurfaceVisible();
 }
 
 function renderDashboard() {
@@ -5918,5 +5937,19 @@ function stageSeed(stageId, start, end) {
   return { id: uid(), stageId, start, end };
 }
 
-initTheme();
-init();
+async function bootApp() {
+  initTheme();
+  try {
+    await init();
+  } catch (error) {
+    window.__originaisInitError = String(error?.message || error);
+    console.error("[Originais] Falha na inicialização da aplicação.", error);
+    ensureAuthSurfaceVisible();
+    applyAuthVisibility();
+    showLoginError("Não foi possível concluir a inicialização. Tente recarregar a página.");
+  } finally {
+    ensureAuthSurfaceVisible();
+  }
+}
+
+bootApp();
