@@ -1037,12 +1037,18 @@ async function logoutCurrentUser() {
   const loginForm = document.getElementById("loginForm");
   if (loginForm) loginForm.reset();
   clearLoginError();
+  currentTab = "dashboard";
+  persistCurrentTab();
   applyAuthVisibility();
   ensureAuthSurfaceVisible();
+  const loginView = document.getElementById("loginView");
+  const appShell = document.getElementById("appShell");
+  if (loginView) loginView.hidden = false;
+  if (appShell) appShell.hidden = true;
   renderAll();
   supabaseLogoutInProgress = false;
   if (isRemoteSupabaseAuthEnabled() && !isLocalFileRuntime()) {
-    window.location.replace(`${window.location.pathname}${window.location.search}`);
+    window.location.reload();
     return;
   }
 }
