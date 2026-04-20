@@ -120,6 +120,7 @@ let hasShownSupabaseWarning = false;
 let hasShownSupabaseConfigWarning = false;
 let hasLoggedSupabaseTarget = false;
 let supabaseBaseState = null;
+let lastSupabaseSyncError = "";
 let currentThemePreference = "system";
 let systemThemeMediaQuery = null;
 let pendingGanttMeasureRetry = false;
@@ -214,7 +215,14 @@ async function init() {
   state = loadState();
   const beforeHydrate = JSON.stringify(state);
   state = await hydrateStateFromIndexedDb(state);
-  state = await hydrateStateFromSupabase(state);
+  state = await withTimeout(
+    hydrateStateFromSupabase(state),
+    1800,
+    () => {
+      console.warn("[Originais] Hidratação inicial do Supabase excedeu o tempo limite. Seguindo com estado local.");
+      return state;
+    }
+  );
   if (JSON.stringify(state) !== beforeHydrate) saveState({ skipSupabase: true });
   ensureAdminAccount();
   supabaseBaseState = cloneForSync(state);
@@ -227,7 +235,6 @@ async function init() {
   restoreCurrentTab();
   applyAuthVisibility();
   renderAll();
-  queueSupabaseSync(JSON.stringify(state));
 }
 
 function bindNavigation() {
@@ -4512,6 +4519,39 @@ function valueEquals(a, b) {
   return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 }
 
+function setLastSupabaseSyncError(error) {
+  const message = String(error?.message || error || "").trim();
+  lastSupabaseSyncError = message;
+  try {
+    window.__originaisLastSupabaseError = message;
+  } catch {}
+}
+
+function clearLastSupabaseSyncError() {
+  lastSupabaseSyncError = "";
+  try {
+    window.__originaisLastSupabaseError = "";
+  } catch {}
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout(promise, timeoutMs, fallbackFactory) {
+  let timerId = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((resolve) => {
+        timerId = setTimeout(() => resolve(fallbackFactory()), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timerId) clearTimeout(timerId);
+  }
+}
+
 function mapById(list = []) {
   const map = new Map();
   if (!Array.isArray(list)) return map;
@@ -4916,6 +4956,36 @@ async function fetchSupabaseStatePayload(client) {
   return result.data;
 }
 
+async function verifySupabaseRemoteState(client, expectedState) {
+  try {
+    const remotePayload = await fetchSupabaseStatePayload(client);
+    if (!remotePayload?.state) return false;
+    const parsedRemote = typeof remotePayload.state === "string" ? JSON.parse(remotePayload.state) : remotePayload.state;
+    const remoteState = maybeRecoverProjectsFromBackup(mergeState(parsedRemote));
+    const expected = maybeRecoverProjectsFromBackup(mergeState(expectedState));
+    return valueEquals(remoteState, expected);
+  } catch (error) {
+    console.warn("[Originais] Falha ao verificar estado remoto após tentativa de sync.", error?.message || error);
+    return false;
+  }
+}
+
+async function writeSupabaseState(client, payload) {
+  if (client.mode === "rest") {
+    await supabaseRestUpsertState(client, payload);
+    return;
+  }
+  const { error } = await client.from(SUPABASE_STATE_TABLE).upsert(
+    {
+      id: supabaseStateId,
+      state: payload,
+      updated_at: new Date().toISOString()
+    },
+    { onConflict: "id" }
+  );
+  if (error) throw error;
+}
+
 async function hydrateStateFromSupabase(currentState) {
   const client = getSupabaseClient();
   if (!client) return currentState;
@@ -4935,6 +5005,7 @@ async function hydrateStateFromSupabase(currentState) {
 async function persistStateToSupabase(stateRaw) {
   const client = getSupabaseClient();
   if (!client) return false;
+  let payload = null;
   try {
     const localState = maybeRecoverProjectsFromBackup(mergeState(typeof stateRaw === "string" ? JSON.parse(stateRaw) : stateRaw));
     let remoteState = null;
@@ -4951,28 +5022,29 @@ async function persistStateToSupabase(stateRaw) {
     const baseState = supabaseBaseState ? cloneForSync(supabaseBaseState) : cloneForSync(localState);
     const actor = getCurrentUser();
     const auditEntries = buildProjectAuditEntries(baseState?.projects || [], localState?.projects || [], actor);
-    const payload = mergeConcurrentState(baseState, localState, remoteState || baseState, auditEntries);
+    payload = mergeConcurrentState(baseState, localState, remoteState || baseState, auditEntries);
 
-    if (client.mode === "rest") {
-      await supabaseRestUpsertState(client, payload);
-    } else {
-      const { error } = await client.from(SUPABASE_STATE_TABLE).upsert(
-        {
-          id: supabaseStateId,
-          state: payload,
-          updated_at: new Date().toISOString()
-        },
-        { onConflict: "id" }
-      );
-      if (error) {
-        console.warn("[Originais] Falha ao persistir estado no Supabase.", error.message || error);
-        return false;
-      }
+    try {
+      await writeSupabaseState(client, payload);
+    } catch (error) {
+      console.warn("[Originais] Primeira tentativa de sync com Supabase falhou. Tentando novamente.", error?.message || error);
+      await wait(700);
+      await writeSupabaseState(client, payload);
     }
     supabaseBaseState = cloneForSync(localState);
+    clearLastSupabaseSyncError();
     return true;
   } catch (error) {
     console.warn("[Originais] Falha ao serializar/salvar estado no Supabase.", error);
+    setLastSupabaseSyncError(error);
+    if (client && payload) {
+      const confirmed = await verifySupabaseRemoteState(client, payload);
+      if (confirmed) {
+        console.info("[Originais] Estado confirmado no Supabase após erro de resposta. Seguindo sem alerta.");
+        clearLastSupabaseSyncError();
+        return true;
+      }
+    }
     return false;
   }
 }
