@@ -140,6 +140,51 @@ const FIELD_TO_SETTINGS_KEY = {
   status: "statuses"
 };
 
+function getSupabaseProjectRef() {
+  const { url } = getSupabaseConfig();
+  const host = String(url || "")
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .split("/")[0];
+  return host ? host.split(".")[0] : "";
+}
+
+function parseSupabaseStoredSession(rawValue) {
+  if (!rawValue) return null;
+  try {
+    const parsed = JSON.parse(rawValue);
+    if (parsed?.access_token && parsed?.user) return parsed;
+    if (parsed?.currentSession?.access_token && parsed?.currentSession?.user) return parsed.currentSession;
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        if (item?.access_token && item?.user) return item;
+        if (item?.currentSession?.access_token && item?.currentSession?.user) return item.currentSession;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+function readSupabaseStoredSession() {
+  try {
+    const ref = getSupabaseProjectRef();
+    const storage = window.localStorage;
+    if (!storage) return null;
+    const exactKey = ref ? `sb-${ref}-auth-token` : "";
+    if (exactKey) {
+      const exactValue = parseSupabaseStoredSession(storage.getItem(exactKey));
+      if (exactValue) return exactValue;
+    }
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (!key || !/^sb-.*-auth-token$/.test(key)) continue;
+      const value = parseSupabaseStoredSession(storage.getItem(key));
+      if (value) return value;
+    }
+  } catch (_) {}
+  return null;
+}
+
 function normalizeThemePreference(value) {
   const normalized = String(value || "").trim().toLowerCase();
   return THEME_VALUES.has(normalized) ? normalized : "system";
@@ -749,6 +794,20 @@ async function initializeSupabaseAuth() {
   if (!isRemoteSupabaseAuthEnabled()) return;
   updateLoginModeUi();
   bindSupabaseAuthListener();
+  if (!supabaseAuthSession) {
+    const cachedSession = readSupabaseStoredSession();
+    if (cachedSession?.access_token && cachedSession?.user) {
+      supabaseAuthSession = cachedSession;
+      try {
+        await getSupabaseClient().auth.setSession({
+          access_token: cachedSession.access_token,
+          refresh_token: cachedSession.refresh_token
+        });
+      } catch (error) {
+        console.warn("[Originais] Falha ao restaurar sessão armazenada do Supabase.", error?.message || error);
+      }
+    }
+  }
   const { data, error } = await getSupabaseClient().auth.getSession();
   if (error) {
     console.warn("[Originais] Falha ao obter sessão do Supabase.", error.message || error);
@@ -830,6 +889,8 @@ function persistSessionUser() {
 
 function restoreSessionUser() {
   if (isRemoteSupabaseAuthEnabled()) {
+    const cachedSession = readSupabaseStoredSession();
+    if (!supabaseAuthSession && cachedSession?.user?.email) supabaseAuthSession = cachedSession;
     currentUserId = getCurrentAuthEmail();
     return;
   }
