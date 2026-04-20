@@ -1013,6 +1013,18 @@ textarea {
   place-items: center;
   line-height: 1.05;
   gap: 2px;
+  position: relative;
+}
+
+.g-month::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 0.5px);
+  width: 1px;
+  background: color-mix(in srgb, var(--month-grid) 72%, transparent);
+  pointer-events: none;
 }
 
 .g-month .m-name {
@@ -1147,6 +1159,16 @@ textarea {
     var(--month-grid) calc(var(--month-width) - 1px),
     var(--month-grid) var(--month-width)
   );
+}
+
+.g-half-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: color-mix(in srgb, var(--month-grid) 65%, transparent);
+  pointer-events: none;
+  z-index: 1;
 }
 
 .g-year-divider {
@@ -1298,7 +1320,7 @@ textarea {
   position: absolute;
   top: 6px;
   height: 20px;
-  width: calc(var(--month-width) - 2px);
+  width: calc((var(--month-width) / 2) - 2px);
   border-radius: 5px;
   background: var(--stage-ghost-bg);
   border: 1px dashed var(--stage-ghost-border);
@@ -1786,7 +1808,7 @@ dialog::backdrop {
 
 .stage-row {
   display: grid;
-  grid-template-columns: 1.3fr 0.85fr 0.85fr 0.9fr 1fr auto;
+  grid-template-columns: 1.25fr 0.78fr 0.78fr 0.7fr 0.8fr 1fr auto;
   gap: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1825,7 +1847,7 @@ dialog::backdrop {
 
 .stage-start-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
 }
 

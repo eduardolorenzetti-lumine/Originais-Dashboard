@@ -451,9 +451,9 @@ function bindGanttDelegatedInteractions() {
       const projectId = line.dataset.lineProject;
       const project = state.projects.find((item) => item.id === projectId);
       if (!project) return;
-      const idx = monthIndexFromLinePointer(line, event);
+      const idx = halfMonthIndexFromLinePointer(line, event);
       if (idx == null) return;
-      const month = addMonths(state.timeline.start, idx);
+      const month = halfIndexToStagePeriod(monthToIndex(state.timeline.start) * 2 + idx);
       try {
         openStageDialog(projectId, null, month);
       } catch (error) {
@@ -548,7 +548,7 @@ function bindAuthActions() {
     const email = String(document.getElementById("loginEmail").value || "").trim().toLowerCase();
     const password = document.getElementById("loginPassword").value;
     if (isRemoteSupabaseAuthEnabled()) {
-      const sent = await sendMagicLink(email, { allowCreate: false });
+      const sent = await sendMagicLink(email, { allowCreate: true });
       if (!sent) return;
       showLoginError("Enviamos um link de acesso para o seu e-mail.", { tone: "success" });
       return;
@@ -582,7 +582,7 @@ function bindAuthActions() {
   forgotPasswordBtn.addEventListener("click", () => {
     if (isRemoteSupabaseAuthEnabled()) {
       const email = String(document.getElementById("loginEmail").value || "").trim().toLowerCase();
-      void sendMagicLink(email, { allowCreate: false, showGenericSuccess: true });
+      void sendMagicLink(email, { allowCreate: true, showGenericSuccess: true });
       return;
     }
     void startForgotPasswordFlow();
@@ -590,7 +590,7 @@ function bindAuthActions() {
   firstAccessBtn?.addEventListener("click", () => {
     if (isRemoteSupabaseAuthEnabled()) {
       const email = String(document.getElementById("loginEmail").value || "").trim().toLowerCase();
-      void sendMagicLink(email, { allowCreate: false, showGenericSuccess: true });
+      void sendMagicLink(email, { allowCreate: true, showGenericSuccess: true });
       return;
     }
     void startFirstAccessFlow();
@@ -929,7 +929,7 @@ async function startForgotPasswordFlow() {
   if (isRemoteSupabaseAuthEnabled()) {
     const email = prompt("Informe o e-mail cadastrado:");
     if (!email) return;
-    await sendMagicLink(email, { allowCreate: false, showGenericSuccess: true });
+    await sendMagicLink(email, { allowCreate: true, showGenericSuccess: true });
     return;
   }
   const email = prompt("Informe o e-mail cadastrado:");
@@ -956,7 +956,7 @@ async function startFirstAccessFlow() {
   if (isRemoteSupabaseAuthEnabled()) {
     const email = prompt("Informe o e-mail do convite:");
     if (!email) return;
-    await sendMagicLink(email, { allowCreate: false, showGenericSuccess: true });
+    await sendMagicLink(email, { allowCreate: true, showGenericSuccess: true });
     return;
   }
   const email = prompt("Informe o e-mail do convite:");
@@ -1121,7 +1121,8 @@ function bindDialog() {
     else projectReleaseDatePickerInput.click();
   });
 
-  [stageStartMonthInput, stageStartYearInput, stageDurationInput].forEach((input) => {
+  const stageStartHalfInput = document.getElementById("stageStartHalf");
+  [stageStartMonthInput, stageStartYearInput, stageStartHalfInput, stageDurationInput].forEach((input) => {
     if (!input) return;
     input.addEventListener("input", updateStageDialogMonthLabels);
     input.addEventListener("change", updateStageDialogMonthLabels);
@@ -1178,7 +1179,7 @@ function bindDialog() {
     const start = document.getElementById("stageStart").value;
     const end = document.getElementById("stageEnd").value;
     const notes = document.getElementById("stageNotes").value.trim();
-    if (!projectId || !stageTypeId || !start || !end || monthToIndex(start) > monthToIndex(end)) {
+    if (!projectId || !stageTypeId || !start || !end || stagePeriodToHalfIndex(start, "start") > stagePeriodToHalfIndex(end, "end")) {
       alert("Preencha etapa, início e fim com período válido.");
       return;
     }
@@ -1196,7 +1197,7 @@ function bindDialog() {
     const idx = project.stages.findIndex((s) => s.id === payload.id);
     if (idx >= 0) project.stages[idx] = { ...project.stages[idx], ...payload };
     else project.stages.push(payload);
-    project.stages.sort((a, b) => monthToIndex(a.start) - monthToIndex(b.start));
+    project.stages.sort((a, b) => stagePeriodToHalfIndex(a.start, "start") - stagePeriodToHalfIndex(b.start, "start"));
     saveState();
     stageDialog.close();
     renderAll();
@@ -1692,10 +1693,13 @@ function getNextStageStartFromStageRows(stageWrap) {
   if (!stageWrap) return "";
   const stageEnds = [...stageWrap.querySelectorAll(".stage-row [data-field='end']")]
     .map((el) => String(el.value || "").trim())
-    .filter((value) => isValidMonth(value));
+    .filter((value) => isValidStagePeriod(value));
   if (!stageEnds.length) return "";
-  const latestEnd = stageEnds.reduce((latest, value) => (monthToIndex(value) > monthToIndex(latest) ? value : latest), stageEnds[0]);
-  return addMonths(latestEnd, 1);
+  const latestEnd = stageEnds.reduce(
+    (latest, value) => (stagePeriodToHalfIndex(value, "end") > stagePeriodToHalfIndex(latest, "end") ? value : latest),
+    stageEnds[0]
+  );
+  return addHalfMonths(normalizeStageEndPeriod(latestEnd), 1);
 }
 
 function getNextAvailableStageIdByUsedSet(usedStageIds) {
@@ -1794,6 +1798,7 @@ function renderGantt() {
   const monthWidth = Math.max(minMonthWidth, availableWidth / months.length);
   const timelineWidth = months.length * monthWidth;
   container.style.setProperty("--month-width", `${monthWidth}px`);
+  container.style.setProperty("--half-width", `${monthWidth / 2}px`);
   const currentMonthIso = (() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -1834,30 +1839,32 @@ function renderGantt() {
 
     html += `<div class="g-line" data-line-project="${project.id}">`;
     months.forEach((m, idx) => {
+      html += `<div class="g-half-divider" style="left: calc(${idx} * var(--month-width) + (var(--month-width) / 2));" aria-hidden="true"></div>`;
       if (idx > 0 && String(m).endsWith("-01")) {
         html += `<div class="g-year-divider" style="left: calc(${idx} * var(--month-width));" aria-hidden="true"></div>`;
       }
     });
     const stages = Array.isArray(project?.stages) ? project.stages : [];
     stages.forEach((st) => {
-      if (!st || !isValidMonth(st.start) || !isValidMonth(st.end)) return;
-      const startIndex = monthToIndex(st.start);
-      const endIndex = monthToIndex(st.end);
+      if (!st || !isValidStagePeriod(st.start) || !isValidStagePeriod(st.end)) return;
+      const startIndex = stagePeriodToHalfIndex(st.start, "start");
+      const endIndex = stagePeriodToHalfIndex(st.end, "end");
       if (!Number.isFinite(startIndex) || !Number.isFinite(endIndex)) return;
-      const start = startIndex - monthToIndex(state.timeline.start);
-      const end = endIndex - monthToIndex(state.timeline.start);
-      if (end < 0 || start >= months.length) return;
+      const timelineStartIndex = monthToIndex(state.timeline.start) * 2;
+      const start = startIndex - timelineStartIndex;
+      const end = endIndex - timelineStartIndex;
+      if (end < 0 || start >= months.length * 2) return;
       const visStart = Math.max(0, start);
-      const visEnd = Math.min(months.length - 1, end);
+      const visEnd = Math.min(months.length * 2 - 1, end);
       const width = visEnd - visStart + 1;
       if (!Number.isFinite(width) || width <= 0) return;
       const stageDef = state.settings.stages.find((s) => s.id === st.stageId);
       const color = stageDef?.color || "#cbd5e1";
       const stageLabel = stageDef?.name || st.name || "Etapa";
-      const stageTitle = `${stageLabel}: ${monthHoverLabel(st.start)} - ${monthHoverLabel(st.end)}`;
+      const stageTitle = `${stageLabel}: ${stagePeriodHoverLabel(st.start, "start")} - ${stagePeriodHoverLabel(st.end, "end")}`;
       const selected = selectedStageRef && selectedStageRef.projectId === project.id && selectedStageRef.stageId === st.id;
 
-      html += `<div class="stage-bar ${selected ? "selected" : ""}" style="left: calc(${visStart} * var(--month-width)); width: calc(${width} * var(--month-width) - 2px); background:${color}" data-project="${project.id}" data-stage="${st.id}" title="${escapeHtml(stageTitle)}">
+      html += `<div class="stage-bar ${selected ? "selected" : ""}" style="left: calc(${visStart} * (var(--month-width) / 2)); width: calc(${width} * (var(--month-width) / 2) - 2px); background:${color}" data-project="${project.id}" data-stage="${st.id}" title="${escapeHtml(stageTitle)}">
         <span class="label">${escapeHtml(stageLabel)}</span>
         <span class="stage-handle left" data-resize="left"></span>
         <span class="stage-handle right" data-resize="right"></span>
@@ -2003,9 +2010,9 @@ function renderGantt() {
       if (event.target instanceof Element && event.target.closest(".stage-bar, .release-stage-bar")) return;
       const project = state.projects.find((item) => item.id === projectId);
       if (!project) return;
-      const idx = monthIndexFromLinePointer(line, event);
+      const idx = halfMonthIndexFromLinePointer(line, event);
       if (idx == null) return;
-      const month = addMonths(state.timeline.start, idx);
+      const month = halfIndexToStagePeriod(monthToIndex(state.timeline.start) * 2 + idx);
       openStageDialog(projectId, null, month);
     });
   });
@@ -2117,6 +2124,7 @@ function openStageDialog(projectId, stageId = null, forcedStart = null) {
   const dialog = document.getElementById("stageDialog");
   const stageSelect = document.getElementById("stageTypeSelect");
   const startMonthSelect = document.getElementById("stageStartMonth");
+  const startHalfSelect = document.getElementById("stageStartHalf");
   const monthTemplate = document.getElementById("stageMonthOptionsTpl");
   const selectedStageId = stage?.stageId || suggestedStageId || state.settings.stages[0]?.id || "";
 
@@ -2124,11 +2132,12 @@ function openStageDialog(projectId, stageId = null, forcedStart = null) {
     .map((st) => `<option value="${st.id}" ${st.id === selectedStageId ? "selected" : ""}>${escapeHtml(st.name)}</option>`)
     .join("");
   if (startMonthSelect && monthTemplate) startMonthSelect.innerHTML = monthTemplate.innerHTML;
+  if (startHalfSelect && !startHalfSelect.value) startHalfSelect.value = "1";
 
   document.getElementById("stageDialogTitle").textContent = stage ? "Editar Etapa" : "Nova Etapa";
   document.getElementById("stageProjectId").value = project.id;
   document.getElementById("stageId").value = stage?.id || "";
-  const start = stage?.start || forcedStart || state.timeline.start;
+  const start = stage?.start || forcedStart || `${state.timeline.start}-1`;
   const end = stage?.end || start;
   setStageDialogRange(start, end);
   document.getElementById("stageNotes").value = stage?.notes || "";
@@ -2146,14 +2155,15 @@ function startStageDrag(event, bar, mode) {
   const stage = project?.stages.find((s) => s.id === stageId);
   if (!stage) return;
   const monthWidth = parseFloat(getComputedStyle(document.getElementById("ganttContainer")).getPropertyValue("--month-width")) || 46;
+  const halfWidth = monthWidth / 2;
   draggingStage = {
     projectId,
     stageId,
     mode,
     startX: event.clientX,
-    startMonth: monthToIndex(stage.start),
-    endMonth: monthToIndex(stage.end),
-    monthWidth,
+    startMonth: stagePeriodToHalfIndex(stage.start, "start"),
+    endMonth: stagePeriodToHalfIndex(stage.end, "end"),
+    monthWidth: halfWidth,
     moved: false
   };
   document.addEventListener("mousemove", onStageDragMove);
@@ -2177,8 +2187,8 @@ function onStageDragMove(event) {
   } else if (draggingStage.mode === "right") {
     end = Math.max(draggingStage.endMonth + delta, start);
   }
-  stage.start = indexToMonth(start);
-  stage.end = indexToMonth(end);
+  stage.start = halfIndexToStagePeriod(start);
+  stage.end = halfIndexToStagePeriod(end);
   if (delta !== 0) draggingStage.moved = true;
   renderGantt();
 }
@@ -2287,18 +2297,18 @@ function openReleaseDateEditor(projectId) {
   else picker.click();
 }
 
-function monthIndexFromLinePointer(line, event) {
+function halfMonthIndexFromLinePointer(line, event) {
   const rect = line.getBoundingClientRect();
   const monthWidth = parseFloat(getComputedStyle(document.getElementById("ganttContainer")).getPropertyValue("--month-width")) || 46;
   const x = event.clientX - rect.left;
-  const idx = Math.floor(x / monthWidth);
-  const max = monthsBetween(state.timeline.start, state.timeline.end).length - 1;
+  const idx = Math.floor(x / (monthWidth / 2));
+  const max = monthsBetween(state.timeline.start, state.timeline.end).length * 2 - 1;
   if (idx < 0 || idx > max) return null;
   return idx;
 }
 
 function renderStageGhost(line, event) {
-  const idx = monthIndexFromLinePointer(line, event);
+  const idx = halfMonthIndexFromLinePointer(line, event);
   if (idx == null) return;
   let ghost = line.querySelector(".stage-ghost");
   if (!ghost) {
@@ -2306,8 +2316,8 @@ function renderStageGhost(line, event) {
     ghost.className = "stage-ghost";
     line.appendChild(ghost);
   }
-  ghost.style.left = `calc(${idx} * var(--month-width))`;
-  ghost.textContent = monthHoverLabel(addMonths(state.timeline.start, idx));
+  ghost.style.left = `calc(${idx} * (var(--month-width) / 2))`;
+  ghost.textContent = stagePeriodHoverLabel(halfIndexToStagePeriod(monthToIndex(state.timeline.start) * 2 + idx), "start");
 }
 
 function removeStageGhost(line) {
@@ -2708,6 +2718,12 @@ function renderUsers() {
         alert("Apenas ADMIN pode gerir usuários.");
         return;
       }
+      const currentEmail = normalizeUserEmail(getCurrentUser()?.email || getCurrentAuthEmail());
+      const targetEmail = normalizeUserEmail(btn.dataset.id);
+      if (currentEmail && targetEmail && currentEmail === targetEmail) {
+        alert("Para evitar bloqueio do sistema, não é possível excluir o usuário que está logado.");
+        return;
+      }
       if (!confirm("Excluir usuário?")) return;
       if (isRemoteSupabaseAuthEnabled()) {
         try {
@@ -2980,7 +2996,7 @@ function collectProjectForm() {
       const stageId = row.querySelector('[data-field="stageId"]').value;
       const start = row.querySelector('[data-field="start"]').value;
       const end = row.querySelector('[data-field="end"]').value;
-      if (!stageId || !start || !end || monthToIndex(start) > monthToIndex(end)) return null;
+      if (!stageId || !start || !end || stagePeriodToHalfIndex(start, "start") > stagePeriodToHalfIndex(end, "end")) return null;
       const previous = existingStagesById.get(row.dataset.id) || {};
       return {
         ...previous,
@@ -3032,15 +3048,17 @@ function buildStageRow(stage = null, options = {}) {
 
   const startMonthSelect = row.querySelector('[data-field="startMonth"]');
   const startYearSelect = row.querySelector('[data-field="startYear"]');
+  const startHalfSelect = row.querySelector('[data-field="startHalf"]');
   const durationInput = row.querySelector('[data-field="duration"]');
   const monthTemplate = document.getElementById("stageMonthOptionsTpl");
 
   if (startMonthSelect && monthTemplate) startMonthSelect.innerHTML = monthTemplate.innerHTML;
-  const defaultStart = stage?.start || preferredStart || currentIsoMonth;
-  populateStageYearSelect(startYearSelect, defaultStart);
+  const defaultStart = stage?.start || preferredStart || `${currentIsoMonth}-1`;
+  populateStageYearSelect(startYearSelect, normalizeStageStartPeriod(defaultStart).slice(0, 7));
+  fillStageDurationOptions(durationInput, stageDurationFromRange(stage?.start || defaultStart, stage?.end || defaultStart));
   setStageRowRange(row, defaultStart, stage?.end || defaultStart);
 
-  [startMonthSelect, startYearSelect, durationInput].forEach((input) => {
+  [startMonthSelect, startYearSelect, startHalfSelect, durationInput].forEach((input) => {
     if (!input) return;
     input.addEventListener("input", () => updateStageRowMonthLabels(row));
     input.addEventListener("change", () => updateStageRowMonthLabels(row));
@@ -3977,8 +3995,8 @@ function avgMonthsByStage(projects) {
   projects.forEach((p) => {
     p.stages.forEach((s) => {
       if (!allowedStageIds.has(s.stageId)) return;
-      if (!acc[s.stageId] || !isValidMonth(s.start) || !isValidMonth(s.end)) return;
-      const months = monthToIndex(s.end) - monthToIndex(s.start) + 1;
+      if (!acc[s.stageId] || !isValidStagePeriod(s.start) || !isValidStagePeriod(s.end)) return;
+      const months = stageDurationFromRange(s.start, s.end);
       if (!Number.isFinite(months) || months <= 0) return;
       acc[s.stageId].total += months;
       acc[s.stageId].count += 1;
@@ -4061,22 +4079,81 @@ function monthLabelPtBrFull(isoMonth) {
   return `${labels[Number(m) - 1]}/${y}`;
 }
 
+function isValidStagePeriod(value) {
+  return /^\d{4}-\d{2}(?:-[12])?$/.test(String(value || ""));
+}
+
+function normalizeStageStartPeriod(value) {
+  if (!isValidStagePeriod(value)) return "";
+  return /^\d{4}-\d{2}$/.test(String(value || "")) ? `${value}-1` : String(value);
+}
+
+function normalizeStageEndPeriod(value) {
+  if (!isValidStagePeriod(value)) return "";
+  return /^\d{4}-\d{2}$/.test(String(value || "")) ? `${value}-2` : String(value);
+}
+
+function stagePeriodParts(value, boundary = "start") {
+  if (!isValidStagePeriod(value)) return null;
+  const raw = String(value);
+  const [year, month, halfRaw] = raw.split("-");
+  const half = halfRaw === "1" || halfRaw === "2" ? Number(halfRaw) : boundary === "end" ? 2 : 1;
+  return {
+    year: Number(year),
+    month: Number(month),
+    half,
+    monthIso: `${year}-${month}`
+  };
+}
+
+function stagePeriodToHalfIndex(value, boundary = "start") {
+  const parts = stagePeriodParts(value, boundary);
+  if (!parts || !isValidMonth(parts.monthIso)) return Number.NaN;
+  return monthToIndex(parts.monthIso) * 2 + (parts.half - 1);
+}
+
+function halfIndexToStagePeriod(index) {
+  if (!Number.isFinite(index)) return "";
+  const monthIso = indexToMonth(Math.floor(index / 2));
+  const half = index % 2 === 0 ? 1 : 2;
+  return `${monthIso}-${half}`;
+}
+
+function composeStagePeriod(yearValue, monthValue, halfValue = "1") {
+  const monthIso = composeIsoMonth(yearValue, monthValue);
+  const half = String(halfValue || "").trim();
+  if (!monthIso || !/^[12]$/.test(half)) return "";
+  return `${monthIso}-${half}`;
+}
+
+function addHalfMonths(period, halfSteps) {
+  return halfIndexToStagePeriod(stagePeriodToHalfIndex(period, "start") + halfSteps);
+}
+
+function stagePeriodHoverLabel(value, boundary = "start") {
+  const parts = stagePeriodParts(value, boundary);
+  if (!parts) return "";
+  const halfLabel = parts.half === 1 ? "1ª quinzena" : "2ª quinzena";
+  return `${monthHoverLabel(parts.monthIso)} • ${halfLabel}`;
+}
+
 function stageYearBounds() {
   const nowYear = new Date().getFullYear();
   return { min: 2017, max: nowYear + 10 };
 }
 
 function stageDurationFromRange(start, end) {
-  if (!isValidMonth(start) || !isValidMonth(end)) return 1;
-  const diff = monthToIndex(end) - monthToIndex(start) + 1;
+  const diff = stagePeriodToHalfIndex(normalizeStageEndPeriod(end), "end") - stagePeriodToHalfIndex(normalizeStageStartPeriod(start), "start") + 1;
   if (!Number.isFinite(diff) || diff < 1) return 1;
-  return diff;
+  return diff / 2;
 }
 
 function sanitizeStageDuration(value) {
-  const parsed = Math.floor(Number(value));
-  if (!Number.isFinite(parsed) || parsed < 1) return 1;
-  return Math.min(parsed, 240);
+  const normalized = String(value ?? "").replace(",", ".").trim();
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0.5) return 0.5;
+  const halfSteps = Math.round(parsed * 2);
+  return Math.min(240, halfSteps) / 2;
 }
 
 function composeIsoMonth(yearValue, monthValue) {
@@ -4103,31 +4180,37 @@ function setStageRowRange(row, start, end) {
   if (!row) return;
   const startMonthSelect = row.querySelector('[data-field="startMonth"]');
   const startYearSelect = row.querySelector('[data-field="startYear"]');
+  const startHalfSelect = row.querySelector('[data-field="startHalf"]');
   const durationInput = row.querySelector('[data-field="duration"]');
-  if (!startMonthSelect || !startYearSelect || !durationInput) return;
+  if (!startMonthSelect || !startYearSelect || !startHalfSelect || !durationInput) return;
 
-  const normalizedStart = isValidMonth(start) ? start : state.timeline.start;
-  const normalizedEnd = isValidMonth(end) ? end : normalizedStart;
+  const normalizedStart = isValidStagePeriod(start) ? normalizeStageStartPeriod(start) : `${state.timeline.start}-1`;
+  const normalizedEnd = isValidStagePeriod(end) ? normalizeStageEndPeriod(end) : normalizedStart;
+  const parts = stagePeriodParts(normalizedStart, "start");
 
-  startMonthSelect.value = normalizedStart.slice(5, 7);
-  startYearSelect.value = normalizedStart.slice(0, 4);
-  durationInput.value = String(stageDurationFromRange(normalizedStart, normalizedEnd));
+  startMonthSelect.value = String(parts?.month || "").padStart(2, "0");
+  startYearSelect.value = String(parts?.year || "");
+  startHalfSelect.value = String(parts?.half || 1);
+  fillStageDurationOptions(durationInput, stageDurationFromRange(normalizedStart, normalizedEnd));
   updateStageRowMonthLabels(row);
 }
 
 function setStageDialogRange(start, end) {
   const monthSelect = document.getElementById("stageStartMonth");
   const yearSelect = document.getElementById("stageStartYear");
+  const halfSelect = document.getElementById("stageStartHalf");
   const durationInput = document.getElementById("stageDuration");
-  if (!monthSelect || !yearSelect || !durationInput) return;
+  if (!monthSelect || !yearSelect || !halfSelect || !durationInput) return;
 
-  const normalizedStart = isValidMonth(start) ? start : state.timeline.start;
-  const normalizedEnd = isValidMonth(end) ? end : normalizedStart;
+  const normalizedStart = isValidStagePeriod(start) ? normalizeStageStartPeriod(start) : `${state.timeline.start}-1`;
+  const normalizedEnd = isValidStagePeriod(end) ? normalizeStageEndPeriod(end) : normalizedStart;
+  const parts = stagePeriodParts(normalizedStart, "start");
 
-  populateStageYearSelect(yearSelect, normalizedStart);
-  monthSelect.value = normalizedStart.slice(5, 7);
-  yearSelect.value = normalizedStart.slice(0, 4);
-  durationInput.value = String(stageDurationFromRange(normalizedStart, normalizedEnd));
+  populateStageYearSelect(yearSelect, parts?.monthIso || state.timeline.start);
+  monthSelect.value = String(parts?.month || "").padStart(2, "0");
+  yearSelect.value = String(parts?.year || "");
+  halfSelect.value = String(parts?.half || 1);
+  fillStageDurationOptions(durationInput, stageDurationFromRange(normalizedStart, normalizedEnd));
   updateStageDialogMonthLabels();
 }
 
@@ -4135,57 +4218,85 @@ function updateStageRowMonthLabels(row) {
   if (!row) return;
   const startMonthSelect = row.querySelector('[data-field="startMonth"]');
   const startYearSelect = row.querySelector('[data-field="startYear"]');
+  const startHalfSelect = row.querySelector('[data-field="startHalf"]');
   const durationInput = row.querySelector('[data-field="duration"]');
   const startHidden = row.querySelector('[data-field="start"]');
   const endHidden = row.querySelector('[data-field="end"]');
   const endPreview = row.querySelector('[data-field="endPreview"]');
   const periodLabel = row.querySelector('[data-month-label="period"]');
-  if (!startMonthSelect || !startYearSelect || !durationInput) return;
+  if (!startMonthSelect || !startYearSelect || !startHalfSelect || !durationInput) return;
 
-  const start = composeIsoMonth(startYearSelect.value, startMonthSelect.value);
+  const start = composeStagePeriod(startYearSelect.value, startMonthSelect.value, startHalfSelect.value);
   const duration = sanitizeStageDuration(durationInput.value);
-  durationInput.value = String(duration);
-  if (!isValidMonth(start)) {
+  fillStageDurationOptions(durationInput, duration);
+  if (!isValidStagePeriod(start)) {
     if (startHidden) startHidden.value = "";
     if (endHidden) endHidden.value = "";
     if (endPreview) endPreview.value = "";
-    if (periodLabel) periodLabel.textContent = "Selecione mês/ano";
+    if (periodLabel) periodLabel.textContent = "Selecione mês/ano/quinzena";
     return;
   }
 
-  const end = addMonths(start, duration - 1);
+  const end = addHalfMonths(start, Math.round(duration * 2) - 1);
   if (startHidden) startHidden.value = start;
   if (endHidden) endHidden.value = end;
-  if (endPreview) endPreview.value = monthHoverLabel(end);
-  if (periodLabel) periodLabel.textContent = `${monthLabelPtBrFull(start)} → ${monthLabelPtBrFull(end)} (${duration} ${duration === 1 ? "mês" : "meses"})`;
+  if (endPreview) endPreview.value = stagePeriodHoverLabel(end, "end");
+  if (periodLabel) periodLabel.textContent = `${stagePeriodHoverLabel(start, "start")} → ${stagePeriodHoverLabel(end, "end")} (${formatStageDurationLabel(duration)})`;
 }
 
 function updateStageDialogMonthLabels() {
   const monthSelect = document.getElementById("stageStartMonth");
   const yearSelect = document.getElementById("stageStartYear");
+  const halfSelect = document.getElementById("stageStartHalf");
   const durationInput = document.getElementById("stageDuration");
   const startHidden = document.getElementById("stageStart");
   const endHidden = document.getElementById("stageEnd");
   const endPreview = document.getElementById("stageEndPreview");
   const periodLabel = document.getElementById("stagePeriodLabel");
-  if (!monthSelect || !yearSelect || !durationInput) return;
+  if (!monthSelect || !yearSelect || !halfSelect || !durationInput) return;
 
-  const start = composeIsoMonth(yearSelect.value, monthSelect.value);
+  const start = composeStagePeriod(yearSelect.value, monthSelect.value, halfSelect.value);
   const duration = sanitizeStageDuration(durationInput.value);
-  durationInput.value = String(duration);
-  if (!isValidMonth(start)) {
+  fillStageDurationOptions(durationInput, duration);
+  if (!isValidStagePeriod(start)) {
     if (startHidden) startHidden.value = "";
     if (endHidden) endHidden.value = "";
     if (endPreview) endPreview.value = "";
-    if (periodLabel) periodLabel.textContent = "Selecione mês/ano";
+    if (periodLabel) periodLabel.textContent = "Selecione mês/ano/quinzena";
     return;
   }
 
-  const end = addMonths(start, duration - 1);
+  const end = addHalfMonths(start, Math.round(duration * 2) - 1);
   if (startHidden) startHidden.value = start;
   if (endHidden) endHidden.value = end;
-  if (endPreview) endPreview.value = monthHoverLabel(end);
-  if (periodLabel) periodLabel.textContent = `${monthLabelPtBrFull(start)} → ${monthLabelPtBrFull(end)} (${duration} ${duration === 1 ? "mês" : "meses"})`;
+  if (endPreview) endPreview.value = stagePeriodHoverLabel(end, "end");
+  if (periodLabel) periodLabel.textContent = `${stagePeriodHoverLabel(start, "start")} → ${stagePeriodHoverLabel(end, "end")} (${formatStageDurationLabel(duration)})`;
+}
+
+function formatStageDurationLabel(value) {
+  const normalized = sanitizeStageDuration(value);
+  const number = Number.isInteger(normalized) ? String(normalized) : String(normalized).replace(".", ",");
+  return `${number} ${normalized === 1 ? "mês" : "meses"}`;
+}
+
+function stageDurationOptionValues() {
+  const out = [];
+  for (let steps = 1; steps <= 480; steps += 1) {
+    out.push(steps / 2);
+  }
+  return out;
+}
+
+function fillStageDurationOptions(select, selectedValue = 1) {
+  if (!select) return;
+  const target = sanitizeStageDuration(selectedValue);
+  select.innerHTML = stageDurationOptionValues()
+    .map((value) => {
+      const label = Number.isInteger(value) ? String(value) : String(value).replace(".", ",");
+      return `<option value="${value}" ${value === target ? "selected" : ""}>${label}</option>`;
+    })
+    .join("");
+  select.value = String(target);
 }
 
 function timelineRangeLabel(start, end) {
@@ -4998,8 +5109,8 @@ function mergeStagesByBase(baseStages = [], localStages = [], remoteStages = [])
   });
 
   return merged.sort((a, b) => {
-    const aStart = monthToIndex(a.start);
-    const bStart = monthToIndex(b.start);
+    const aStart = stagePeriodToHalfIndex(a.start, "start");
+    const bStart = stagePeriodToHalfIndex(b.start, "start");
     if (Number.isFinite(aStart) && Number.isFinite(bStart) && aStart !== bStart) return aStart - bStart;
     return String(a.id).localeCompare(String(b.id));
   });

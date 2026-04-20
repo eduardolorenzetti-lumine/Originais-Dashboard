@@ -509,8 +509,14 @@
       <label>Ano de início
         <select data-field="startYear"></select>
       </label>
+      <label>Quinzena
+        <select data-field="startHalf">
+          <option value="1">1ª</option>
+          <option value="2">2ª</option>
+        </select>
+      </label>
       <label>Duração (meses)
-        <input data-field="duration" type="number" min="1" step="1" value="1" />
+        <select data-field="duration"></select>
       </label>
       <label>Término
         <input data-field="endPreview" type="text" readonly />
@@ -560,10 +566,14 @@
           <div class="stage-start-grid">
             <select id="stageStartMonth" required></select>
             <select id="stageStartYear" required></select>
+            <select id="stageStartHalf" required>
+              <option value="1">1ª quinzena</option>
+              <option value="2">2ª quinzena</option>
+            </select>
           </div>
         </label>
         <label>Duração (meses) *
-          <input type="number" id="stageDuration" min="1" step="1" required />
+          <select id="stageDuration" required></select>
         </label>
         <label>Término
           <input type="text" id="stageEndPreview" readonly />
