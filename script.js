@@ -665,9 +665,9 @@ function bindAuthActions() {
     openUserDialog(currentUserId);
   });
 
-  document.getElementById("profileLogoutBtn").addEventListener("click", () => {
+  document.getElementById("profileLogoutBtn").addEventListener("click", async () => {
     profileMenuList.hidden = true;
-    logoutCurrentUser();
+    await logoutCurrentUser();
   });
 
   document.querySelectorAll("[data-theme-option]").forEach((button) => {
@@ -837,9 +837,26 @@ function authenticateUser(email, password) {
       user.passwordHash = hashPassword(DEFAULT_ADMIN_PASSWORD);
       saveState();
       return user;
-    }
-    return null;
   }
+  return null;
+}
+
+function clearSupabaseStoredSession() {
+  try {
+    const ref = getSupabaseProjectRef();
+    const storage = window.localStorage;
+    if (!storage) return;
+    const keysToRemove = [];
+    const exactKey = ref ? `sb-${ref}-auth-token` : "";
+    if (exactKey && storage.getItem(exactKey) !== null) keysToRemove.push(exactKey);
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (!key || !/^sb-.*-auth-token$/.test(key)) continue;
+      if (!keysToRemove.includes(key)) keysToRemove.push(key);
+    }
+    keysToRemove.forEach((key) => storage.removeItem(key));
+  } catch (_) {}
+}
   return passwordHash === hashPassword(password) ? user : null;
 }
 
@@ -973,7 +990,12 @@ async function logoutCurrentUser() {
   currentUserId = "";
   persistSessionUser();
   if (isRemoteSupabaseAuthEnabled()) {
-    await getSupabaseClient().auth.signOut();
+    try {
+      await getSupabaseClient().auth.signOut({ scope: "local" });
+    } catch (error) {
+      console.warn("[Originais] Falha ao encerrar sessão no Supabase.", error?.message || error);
+    }
+    clearSupabaseStoredSession();
     supabaseAuthSession = null;
     secureUsersLoaded = false;
   }
@@ -981,6 +1003,8 @@ async function logoutCurrentUser() {
   if (loginForm) loginForm.reset();
   clearLoginError();
   applyAuthVisibility();
+  ensureAuthSurfaceVisible();
+  renderAll();
 }
 
 function showLoginError(message, { tone = "error" } = {}) {
