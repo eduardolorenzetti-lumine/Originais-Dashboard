@@ -689,16 +689,24 @@ async function syncCurrentUserFromSupabaseSession({ persistUsers = true } = {}) 
     secureUsersLoaded = false;
     return false;
   }
+  const cachedUsers = Array.isArray(state.users) ? state.users.slice() : [];
+  const cachedAuthorizedUser = cachedUsers.find((user) => normalizeUserEmail(user?.email) === email) || null;
+  let refreshedUsers = false;
   try {
     await refreshSecureUsersFromSupabase({ persist: persistUsers });
+    refreshedUsers = true;
   } catch (error) {
     console.warn("[Originais] Falha ao carregar usuários seguros.", error?.message || error);
-    state.users = [];
-    secureUsersLoaded = true;
+    state.users = cachedUsers;
+    secureUsersLoaded = cachedUsers.length > 0;
   }
   currentUserId = email;
   const current = getCurrentUser();
   if (!current || current.active === false) {
+    if (!refreshedUsers && cachedAuthorizedUser?.active !== false) {
+      clearLoginError();
+      return true;
+    }
     await getSupabaseClient().auth.signOut();
     currentUserId = "";
     showLoginError("Seu e-mail não está autorizado para acessar a plataforma.");
@@ -5443,22 +5451,31 @@ async function writeSupabaseState(client, payload) {
 async function fetchSecureUsersFromSupabase() {
   const client = getSupabaseClient();
   if (!client?.auth || typeof client.from !== "function") return [];
-  const { data, error } = await client
-    .from(SUPABASE_USERS_TABLE)
-    .select("email,name,role,active,invited_at")
-    .eq("active", true)
-    .order("name", { ascending: true });
-  if (error) throw error;
-  return (data || []).map((row) =>
-    sanitizeUserForState({
-      id: row.email,
-      email: row.email,
-      name: row.name,
-      role: row.role,
-      active: row.active,
-      invitedAt: row.invited_at
-    })
-  );
+  const loadUsers = async () => {
+    const { data, error } = await client
+      .from(SUPABASE_USERS_TABLE)
+      .select("email,name,role,active,invited_at")
+      .eq("active", true)
+      .order("name", { ascending: true });
+    if (error) throw error;
+    return (data || []).map((row) =>
+      sanitizeUserForState({
+        id: row.email,
+        email: row.email,
+        name: row.name,
+        role: row.role,
+        active: row.active,
+        invitedAt: row.invited_at
+      })
+    );
+  };
+  try {
+    return await loadUsers();
+  } catch (error) {
+    console.warn("[Originais] Primeira leitura de app_users falhou. Tentando novamente.", error?.message || error);
+    await wait(450);
+    return loadUsers();
+  }
 }
 
 async function upsertSecureUserInSupabase(user) {
