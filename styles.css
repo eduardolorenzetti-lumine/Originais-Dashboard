@@ -149,6 +149,10 @@ body {
   font-size: 0.78rem;
 }
 
+.login-error[data-tone="success"] {
+  color: var(--success);
+}
+
 .login-help-actions {
   display: flex;
   justify-content: center;

@@ -63,6 +63,7 @@ const LEGACY_ADMIN_EMAIL = "admin@originais.com";
 const DEFAULT_ADMIN_PASSWORD = "admin123";
 const DEFAULT_INVITED_PASSWORD = "lumine123";
 const SUPABASE_STATE_TABLE = "app_state";
+const SUPABASE_USERS_TABLE = "app_users";
 const SUPABASE_DEFAULT_STATE_ID = "originais-main";
 const THEME_STORAGE_KEY = "lumine-theme";
 const THEME_VALUES = new Set(["dark", "light", "system"]);
@@ -121,6 +122,9 @@ let hasShownSupabaseConfigWarning = false;
 let hasLoggedSupabaseTarget = false;
 let supabaseBaseState = null;
 let lastSupabaseSyncError = "";
+let supabaseAuthSession = null;
+let supabaseAuthListenerBound = false;
+let secureUsersLoaded = false;
 let currentThemePreference = "system";
 let systemThemeMediaQuery = null;
 let pendingGanttMeasureRetry = false;
@@ -224,13 +228,15 @@ async function init() {
     }
   );
   if (JSON.stringify(state) !== beforeHydrate) saveState({ skipSupabase: true });
-  ensureAdminAccount();
+  if (!isRemoteSupabaseAuthEnabled()) ensureAdminAccount();
   supabaseBaseState = cloneForSync(state);
   applyPtBrLocaleToDateInputs(document);
   bindNavigation();
   bindGlobalActions();
   bindDialog();
   bindAuthActions();
+  updateLoginModeUi();
+  await initializeSupabaseAuth();
   restoreSessionUser();
   restoreCurrentTab();
   applyAuthVisibility();
@@ -541,6 +547,12 @@ function bindAuthActions() {
     event.preventDefault();
     const email = String(document.getElementById("loginEmail").value || "").trim().toLowerCase();
     const password = document.getElementById("loginPassword").value;
+    if (isRemoteSupabaseAuthEnabled()) {
+      const sent = await sendMagicLink(email, { allowCreate: false });
+      if (!sent) return;
+      showLoginError("Enviamos um link de acesso para o seu e-mail.", { tone: "success" });
+      return;
+    }
     let user = authenticateUser(email, password);
     if (!user) {
       await refreshStateFromSupabaseNow();
@@ -567,8 +579,22 @@ function bindAuthActions() {
     renderAll();
   });
 
-  forgotPasswordBtn.addEventListener("click", startForgotPasswordFlow);
-  firstAccessBtn?.addEventListener("click", startFirstAccessFlow);
+  forgotPasswordBtn.addEventListener("click", () => {
+    if (isRemoteSupabaseAuthEnabled()) {
+      const email = String(document.getElementById("loginEmail").value || "").trim().toLowerCase();
+      void sendMagicLink(email, { allowCreate: false, showGenericSuccess: true });
+      return;
+    }
+    void startForgotPasswordFlow();
+  });
+  firstAccessBtn?.addEventListener("click", () => {
+    if (isRemoteSupabaseAuthEnabled()) {
+      const email = String(document.getElementById("loginEmail").value || "").trim().toLowerCase();
+      void sendMagicLink(email, { allowCreate: false, showGenericSuccess: true });
+      return;
+    }
+    void startFirstAccessFlow();
+  });
 
   profileMenuBtn.addEventListener("click", (event) => {
     event.stopPropagation();
@@ -597,6 +623,117 @@ function bindAuthActions() {
   });
 }
 
+function updateLoginModeUi() {
+  const passwordLabel = document.getElementById("loginPassword")?.closest("label");
+  const passwordInput = document.getElementById("loginPassword");
+  const submitButton = document.querySelector("#loginForm button[type='submit']");
+  const forgotPasswordBtn = document.getElementById("forgotPasswordBtn");
+  const firstAccessBtn = document.getElementById("firstAccessBtn");
+  if (isRemoteSupabaseAuthEnabled()) {
+    if (passwordLabel) passwordLabel.hidden = true;
+    if (passwordInput) {
+      passwordInput.required = false;
+      passwordInput.value = "";
+    }
+    if (submitButton) submitButton.textContent = "Enviar link de acesso";
+    if (forgotPasswordBtn) forgotPasswordBtn.textContent = "Reenviar link";
+    if (firstAccessBtn) firstAccessBtn.hidden = true;
+    return;
+  }
+  if (passwordLabel) passwordLabel.hidden = false;
+  if (passwordInput) passwordInput.required = true;
+  if (submitButton) submitButton.textContent = "Entrar";
+  if (forgotPasswordBtn) forgotPasswordBtn.textContent = "Esqueci minha senha!";
+  if (firstAccessBtn) firstAccessBtn.hidden = false;
+}
+
+async function sendMagicLink(email, { allowCreate = false, showGenericSuccess = false } = {}) {
+  if (!isRemoteSupabaseAuthEnabled()) return false;
+  const normalizedEmail = normalizeUserEmail(email);
+  if (!normalizedEmail) {
+    showLoginError("Informe o e-mail para receber o link de acesso.");
+    return false;
+  }
+  const client = getSupabaseClient();
+  const { error } = await client.auth.signInWithOtp({
+    email: normalizedEmail,
+    options: {
+      shouldCreateUser: allowCreate,
+      emailRedirectTo: `${window.location.origin}${window.location.pathname}`
+    }
+  });
+  if (error) {
+    showLoginError("Não foi possível enviar o link de acesso. Confirme se o e-mail está autorizado.");
+    console.warn("[Originais] Falha ao enviar Magic Link.", error.message || error);
+    return false;
+  }
+  if (showGenericSuccess) showLoginError("Se o e-mail estiver autorizado, enviaremos um link de acesso.", { tone: "success" });
+  return true;
+}
+
+async function syncCurrentUserFromSupabaseSession({ persistUsers = true } = {}) {
+  if (!isRemoteSupabaseAuthEnabled()) return false;
+  const email = getCurrentAuthEmail();
+  if (!email) {
+    currentUserId = "";
+    secureUsersLoaded = false;
+    return false;
+  }
+  try {
+    await refreshSecureUsersFromSupabase({ persist: persistUsers });
+  } catch (error) {
+    console.warn("[Originais] Falha ao carregar usuários seguros.", error?.message || error);
+    state.users = [];
+    secureUsersLoaded = true;
+  }
+  currentUserId = email;
+  const current = getCurrentUser();
+  if (!current || current.active === false) {
+    await getSupabaseClient().auth.signOut();
+    currentUserId = "";
+    showLoginError("Seu e-mail não está autorizado para acessar a plataforma.");
+    return false;
+  }
+  clearLoginError();
+  await refreshStateFromSupabaseNow();
+  return true;
+}
+
+function bindSupabaseAuthListener() {
+  if (supabaseAuthListenerBound || !isRemoteSupabaseAuthEnabled()) return;
+  supabaseAuthListenerBound = true;
+  getSupabaseClient().auth.onAuthStateChange(async (_event, session) => {
+    supabaseAuthSession = session || null;
+    const signedIn = await syncCurrentUserFromSupabaseSession({ persistUsers: true });
+    if (!session || !signedIn) {
+      currentUserId = "";
+      persistSessionUser();
+      applyAuthVisibility();
+      renderAll();
+      return;
+    }
+    persistSessionUser();
+    applyAuthVisibility();
+    renderAll();
+  });
+}
+
+async function initializeSupabaseAuth() {
+  if (!isRemoteSupabaseAuthEnabled()) return;
+  updateLoginModeUi();
+  bindSupabaseAuthListener();
+  const { data, error } = await getSupabaseClient().auth.getSession();
+  if (error) {
+    console.warn("[Originais] Falha ao obter sessão do Supabase.", error.message || error);
+    return;
+  }
+  supabaseAuthSession = data.session || null;
+  if (!supabaseAuthSession) return;
+  const signedIn = await syncCurrentUserFromSupabaseSession({ persistUsers: true });
+  if (!signedIn) return;
+  persistSessionUser();
+}
+
 function authenticateUser(email, password) {
   if (!email || !password) return null;
   const user = state.users.find((item) => String(item.email || "").toLowerCase() === email);
@@ -615,7 +752,12 @@ function authenticateUser(email, password) {
 
 function getCurrentUser() {
   if (!currentUserId) return null;
-  return state.users.find((user) => user.id === currentUserId) || null;
+  const normalized = normalizeUserEmail(currentUserId);
+  return (
+    state.users.find(
+      (user) => String(user.id || "").trim() === currentUserId || normalizeUserEmail(user.email) === normalized
+    ) || null
+  );
 }
 
 function isAuthenticated() {
@@ -645,6 +787,7 @@ function canViewUsers() {
 }
 
 function persistSessionUser() {
+  if (isRemoteSupabaseAuthEnabled()) return;
   try {
     if (currentUserId) sessionStorage.setItem(SESSION_USER_KEY, currentUserId);
     else sessionStorage.removeItem(SESSION_USER_KEY);
@@ -652,12 +795,21 @@ function persistSessionUser() {
 }
 
 function restoreSessionUser() {
+  if (isRemoteSupabaseAuthEnabled()) {
+    currentUserId = getCurrentAuthEmail();
+    return;
+  }
   try {
     currentUserId = sessionStorage.getItem(SESSION_USER_KEY) || "";
   } catch (_) {
     currentUserId = "";
   }
-  if (currentUserId && !state.users.some((user) => user.id === currentUserId)) currentUserId = "";
+  if (
+    currentUserId &&
+    !state.users.some(
+      (user) => String(user.id || "").trim() === currentUserId || normalizeUserEmail(user.email) === normalizeUserEmail(currentUserId)
+    )
+  ) currentUserId = "";
   persistSessionUser();
 }
 
@@ -711,33 +863,44 @@ function applyAuthVisibility() {
   updateThemeOptionButtons();
 }
 
-function logoutCurrentUser() {
+async function logoutCurrentUser() {
   currentUserId = "";
   persistSessionUser();
+  if (isRemoteSupabaseAuthEnabled()) {
+    await getSupabaseClient().auth.signOut();
+    supabaseAuthSession = null;
+    secureUsersLoaded = false;
+  }
   const loginForm = document.getElementById("loginForm");
   if (loginForm) loginForm.reset();
   clearLoginError();
   applyAuthVisibility();
 }
 
-function showLoginError(message) {
+function showLoginError(message, { tone = "error" } = {}) {
   const error = document.getElementById("loginError");
   error.textContent = message;
+  error.dataset.tone = tone;
   error.hidden = false;
 }
 
 function clearLoginError() {
   const error = document.getElementById("loginError");
   error.textContent = "";
+  delete error.dataset.tone;
   error.hidden = true;
 }
 
 async function refreshStateFromSupabaseNow() {
   const before = JSON.stringify(state);
+  const secureUsersSnapshot = isRemoteSupabaseAuthEnabled()
+    ? (Array.isArray(state.users) ? state.users : []).map(sanitizeUserForState).filter(Boolean)
+    : null;
   const merged = await hydrateStateFromSupabase(state);
   if (JSON.stringify(merged) === before) return false;
   state = merged;
-  ensureAdminAccount();
+  if (secureUsersSnapshot) state.users = secureUsersSnapshot;
+  if (!isRemoteSupabaseAuthEnabled()) ensureAdminAccount();
   supabaseBaseState = cloneForSync(state);
   saveState({ skipSupabase: true });
   return true;
@@ -763,6 +926,12 @@ function promptPasswordSetup(user, { contextLabel = "redefinição de senha", co
 }
 
 async function startForgotPasswordFlow() {
+  if (isRemoteSupabaseAuthEnabled()) {
+    const email = prompt("Informe o e-mail cadastrado:");
+    if (!email) return;
+    await sendMagicLink(email, { allowCreate: false, showGenericSuccess: true });
+    return;
+  }
   const email = prompt("Informe o e-mail cadastrado:");
   if (!email) return;
   const normalizedEmail = String(email).trim().toLowerCase();
@@ -784,6 +953,12 @@ async function startForgotPasswordFlow() {
 }
 
 async function startFirstAccessFlow() {
+  if (isRemoteSupabaseAuthEnabled()) {
+    const email = prompt("Informe o e-mail do convite:");
+    if (!email) return;
+    await sendMagicLink(email, { allowCreate: false, showGenericSuccess: true });
+    return;
+  }
   const email = prompt("Informe o e-mail do convite:");
   if (!email) return;
   const normalizedEmail = String(email).trim().toLowerCase();
@@ -1039,23 +1214,43 @@ function bindDialog() {
   });
 
   document.getElementById("userCancelBtn").addEventListener("click", () => userDialog.close());
-  userForm.addEventListener("submit", (e) => {
+  userForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const payload = collectUserForm();
     if (!payload) return;
 
-    const idx = state.users.findIndex((user) => user.id === payload.id);
-    if (idx >= 0) state.users[idx] = { ...state.users[idx], ...payload, invitedAt: state.users[idx].invitedAt || payload.invitedAt };
-    else state.users.push(payload);
+    if (isRemoteSupabaseAuthEnabled()) {
+      const isNewRemoteUser = !state.users.some(
+        (user) =>
+          String(user.id || "").trim() === payload.id ||
+          normalizeUserEmail(user.email) === normalizeUserEmail(payload.email)
+      );
+      try {
+        await upsertSecureUserInSupabase(payload);
+        await refreshSecureUsersFromSupabase({ persist: true });
+        if (isNewRemoteUser) {
+          const sent = await sendMagicLink(payload.email, { allowCreate: true });
+          if (!sent) alert("Usuário salvo, mas o e-mail de acesso não pôde ser enviado agora.");
+        }
+      } catch (error) {
+        alert("Não foi possível salvar o usuário no Supabase.");
+        console.warn("[Originais] Falha ao salvar usuário seguro.", error?.message || error);
+        return;
+      }
+    } else {
+      const idx = state.users.findIndex((user) => user.id === payload.id);
+      if (idx >= 0) state.users[idx] = { ...state.users[idx], ...payload, invitedAt: state.users[idx].invitedAt || payload.invitedAt };
+      else state.users.push(payload);
+      saveState();
+    }
 
-    saveState();
     userDialog.close();
     renderUsers();
     applyAuthVisibility();
   });
 
   document.getElementById("inviteCancelBtn").addEventListener("click", () => inviteDialog.close());
-  inviteForm.addEventListener("submit", (e) => {
+  inviteForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!canManageUsers()) {
       alert("Apenas ADMIN pode gerir usuários.");
@@ -1064,6 +1259,32 @@ function bindDialog() {
     }
     const payload = collectInviteForm();
     if (!payload) return;
+    if (isRemoteSupabaseAuthEnabled()) {
+      try {
+        await upsertSecureUserInSupabase({
+          id: payload.email,
+          name: displayNameFromEmail(payload.email),
+          email: payload.email,
+          role: payload.role,
+          active: true,
+          invitedAt: new Date().toISOString()
+        });
+        await refreshSecureUsersFromSupabase({ persist: true });
+        const sent = await sendMagicLink(payload.email, { allowCreate: true });
+        if (!sent) {
+          alert("Usuário salvo, mas o e-mail do Magic Link não pôde ser enviado.");
+        } else {
+          alert("Convite enviado por e-mail com sucesso.");
+        }
+      } catch (error) {
+        alert("Não foi possível convidar o usuário.");
+        console.warn("[Originais] Falha ao convidar usuário via Supabase.", error?.message || error);
+        return;
+      }
+      renderUsers();
+      inviteDialog.close();
+      return;
+    }
     const inviteLink = buildUserInviteLink(payload.email, payload.role);
     const existingIdx = state.users.findIndex((user) => String(user.email || "").toLowerCase() === payload.email);
     const invitedAt = new Date().toISOString().slice(0, 10);
@@ -1098,7 +1319,7 @@ function bindDialog() {
 }
 
 function renderAll() {
-  if (currentUserId && !state.users.some((user) => user.id === currentUserId)) {
+  if (currentUserId && !getCurrentUser() && !(isRemoteSupabaseAuthEnabled() && !secureUsersLoaded)) {
     currentUserId = "";
     persistSessionUser();
   }
@@ -2448,7 +2669,13 @@ function renderUsers() {
     .map((user) => {
       const invitedAt = user.invitedAt ? formatDatePtBr(user.invitedAt) : "";
       const inviteText = invitedAt ? `Convidado em ${invitedAt}` : "Sem convite";
-      const passwordState = user.firstAccessPending ? "Primeiro acesso" : user.passwordHash ? "Definida" : "Pendente";
+      const passwordState = isRemoteSupabaseAuthEnabled()
+        ? "Magic Link"
+        : user.firstAccessPending
+          ? "Primeiro acesso"
+          : user.passwordHash
+            ? "Definida"
+            : "Pendente";
       return `<tr>
         <td>${escapeHtml(user.name || "")}</td>
         <td>${escapeHtml(user.email || "")}</td>
@@ -2476,14 +2703,25 @@ function renderUsers() {
   });
 
   body.querySelectorAll("button[data-user-action='del']").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       if (!canManageUsers()) {
         alert("Apenas ADMIN pode gerir usuários.");
         return;
       }
       if (!confirm("Excluir usuário?")) return;
-      state.users = state.users.filter((user) => user.id !== btn.dataset.id);
-      saveState();
+      if (isRemoteSupabaseAuthEnabled()) {
+        try {
+          await deleteSecureUserFromSupabase(btn.dataset.id);
+          await refreshSecureUsersFromSupabase({ persist: true });
+        } catch (error) {
+          alert("Não foi possível excluir o usuário.");
+          console.warn("[Originais] Falha ao excluir usuário seguro.", error?.message || error);
+          return;
+        }
+      } else {
+        state.users = state.users.filter((user) => user.id !== btn.dataset.id);
+        saveState();
+      }
       renderAll();
     });
   });
@@ -2523,19 +2761,41 @@ function openUserDialog(userId = null) {
       return;
     }
   }
-  const user = state.users.find((item) => item.id === userId);
+  const normalizedUserId = normalizeUserEmail(userId);
+  const user = state.users.find(
+    (item) => String(item.id || "").trim() === userId || normalizeUserEmail(item.email) === normalizedUserId
+  );
   document.getElementById("userDialogTitle").textContent = user ? (isAdmin ? "Editar Usuário" : "Editar Perfil") : "Cadastrar Usuário";
-  document.getElementById("userId").value = user?.id || uid();
+  document.getElementById("userId").value = user?.id || user?.email || uid();
   document.getElementById("userName").value = user?.name || "";
-  document.getElementById("userEmail").value = user?.email || "";
+  const userEmailInput = document.getElementById("userEmail");
+  userEmailInput.value = user?.email || "";
+  userEmailInput.readOnly = Boolean(isRemoteSupabaseAuthEnabled() && user);
   const roleSelect = document.getElementById("userRole");
   roleSelect.value = user?.role || "LEITOR";
   roleSelect.disabled = !isAdmin;
   const roleLabel = roleSelect.closest("label");
   if (roleLabel) roleLabel.hidden = !isAdmin;
+  const passwordLabel = document.getElementById("userPassword").closest("label");
+  const passwordConfirmLabel = document.getElementById("userPasswordConfirm").closest("label");
   document.getElementById("userPassword").value = "";
   document.getElementById("userPasswordConfirm").value = "";
-  document.getElementById("userPasswordHint").hidden = !user;
+  const passwordHint = document.getElementById("userPasswordHint");
+  if (isRemoteSupabaseAuthEnabled()) {
+    if (passwordLabel) passwordLabel.hidden = true;
+    if (passwordConfirmLabel) passwordConfirmLabel.hidden = true;
+    if (passwordHint) {
+      passwordHint.hidden = false;
+      passwordHint.textContent = "O acesso é feito por Magic Link enviado por e-mail.";
+    }
+  } else {
+    if (passwordLabel) passwordLabel.hidden = false;
+    if (passwordConfirmLabel) passwordConfirmLabel.hidden = false;
+    if (passwordHint) {
+      passwordHint.hidden = !user;
+      passwordHint.textContent = "Deixe os campos de senha em branco para manter a senha atual.";
+    }
+  }
   dialog.showModal();
 }
 
@@ -2566,6 +2826,20 @@ function collectUserForm() {
   if (state.users.some((user) => user.id !== id && String(user.email || "").toLowerCase() === email)) {
     alert("Já existe um usuário com esse e-mail.");
     return null;
+  }
+  if (isRemoteSupabaseAuthEnabled()) {
+    if (existing?.email && normalizeUserEmail(existing.email) !== email) {
+      alert("Para trocar o e-mail, cadastre um novo usuário e desative/exclua o anterior.");
+      return null;
+    }
+    return {
+      id: existing?.id || email,
+      name,
+      email,
+      role: isAdmin ? (["ADMIN", "EDITOR", "LEITOR"].includes(role) ? role : "LEITOR") : String(existing?.role || current?.role || "LEITOR"),
+      active: true,
+      invitedAt: existing?.invitedAt || new Date().toISOString()
+    };
   }
   if ((!existing || !existing.passwordHash) && !password) {
     alert("Defina uma senha para o usuário.");
@@ -4420,6 +4694,42 @@ function getSupabaseConfig() {
   return { url, anonKey, stateId, envName, enabled };
 }
 
+function isLocalFileRuntime() {
+  return String(window.location.protocol || "").toLowerCase() === "file:";
+}
+
+function isRemoteSupabaseAuthEnabled() {
+  const client = getSupabaseClient();
+  return !isLocalFileRuntime() && Boolean(client?.auth);
+}
+
+function normalizeUserEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function sanitizeUserForState(user) {
+  if (!user || typeof user !== "object") return null;
+  const email = normalizeUserEmail(user.email);
+  if (!email) return null;
+  return {
+    id: String(user.id || email).trim() || email,
+    name: String(user.name || "").trim() || displayNameFromEmail(email),
+    email,
+    role: ["ADMIN", "EDITOR", "LEITOR"].includes(String(user.role || "").trim().toUpperCase())
+      ? String(user.role || "").trim().toUpperCase()
+      : "LEITOR",
+    active: user.active !== false,
+    invitedAt: String(user.invitedAt || user.invited_at || "").trim()
+  };
+}
+
+function setManagedUsers(users = [], { persist = false } = {}) {
+  const normalized = (Array.isArray(users) ? users : []).map(sanitizeUserForState).filter(Boolean);
+  state.users = normalized;
+  secureUsersLoaded = true;
+  if (persist) saveState({ skipSupabase: true });
+}
+
 function getSupabaseClient() {
   if (supabaseClientInstance !== undefined) return supabaseClientInstance;
   const { url, anonKey, stateId, envName, enabled } = getSupabaseConfig();
@@ -4444,7 +4754,11 @@ function getSupabaseClient() {
   }
   try {
     supabaseClientInstance = factory(url, anonKey, {
-      auth: { persistSession: false, autoRefreshToken: false }
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
     });
     return supabaseClientInstance;
   } catch (error) {
@@ -4986,9 +5300,77 @@ async function writeSupabaseState(client, payload) {
   if (error) throw error;
 }
 
+async function fetchSecureUsersFromSupabase() {
+  const client = getSupabaseClient();
+  if (!client?.auth || typeof client.from !== "function") return [];
+  const { data, error } = await client
+    .from(SUPABASE_USERS_TABLE)
+    .select("email,name,role,active,invited_at")
+    .eq("active", true)
+    .order("name", { ascending: true });
+  if (error) throw error;
+  return (data || []).map((row) =>
+    sanitizeUserForState({
+      id: row.email,
+      email: row.email,
+      name: row.name,
+      role: row.role,
+      active: row.active,
+      invitedAt: row.invited_at
+    })
+  );
+}
+
+async function upsertSecureUserInSupabase(user) {
+  const client = getSupabaseClient();
+  if (!client?.auth || typeof client.from !== "function") throw new Error("Supabase Auth indisponível.");
+  const sanitized = sanitizeUserForState(user);
+  if (!sanitized) throw new Error("Usuário inválido.");
+  const payload = {
+    email: sanitized.email,
+    name: sanitized.name,
+    role: sanitized.role,
+    active: sanitized.active !== false,
+    invited_at: sanitized.invitedAt || new Date().toISOString()
+  };
+  const { error } = await client.from(SUPABASE_USERS_TABLE).upsert(payload, { onConflict: "email" });
+  if (error) throw error;
+  return sanitized;
+}
+
+async function deleteSecureUserFromSupabase(email) {
+  const client = getSupabaseClient();
+  if (!client?.auth || typeof client.from !== "function") throw new Error("Supabase Auth indisponível.");
+  const normalizedEmail = normalizeUserEmail(email);
+  if (!normalizedEmail) return;
+  const { error } = await client.from(SUPABASE_USERS_TABLE).delete().eq("email", normalizedEmail);
+  if (error) throw error;
+}
+
+async function refreshSecureUsersFromSupabase({ persist = true } = {}) {
+  if (!isRemoteSupabaseAuthEnabled() || !supabaseAuthSession?.user?.email) return [];
+  const users = await fetchSecureUsersFromSupabase();
+  setManagedUsers(users, { persist });
+  return users;
+}
+
+function getCurrentAuthEmail() {
+  return normalizeUserEmail(supabaseAuthSession?.user?.email || "");
+}
+
+function canSyncToSupabase() {
+  if (isLocalFileRuntime()) return false;
+  const client = getSupabaseClient();
+  if (!client) return false;
+  if (!isRemoteSupabaseAuthEnabled()) return true;
+  return Boolean(supabaseAuthSession?.access_token);
+}
+
 async function hydrateStateFromSupabase(currentState) {
   const client = getSupabaseClient();
   if (!client) return currentState;
+  if (isLocalFileRuntime()) return currentState;
+  if (isRemoteSupabaseAuthEnabled() && !supabaseAuthSession?.access_token) return currentState;
 
   try {
     const data = await fetchSupabaseStatePayload(client);
@@ -5023,6 +5405,7 @@ async function persistStateToSupabase(stateRaw) {
     const actor = getCurrentUser();
     const auditEntries = buildProjectAuditEntries(baseState?.projects || [], localState?.projects || [], actor);
     payload = mergeConcurrentState(baseState, localState, remoteState || baseState, auditEntries);
+    payload.users = (Array.isArray(localState.users) ? localState.users : []).map(sanitizeUserForState).filter(Boolean);
 
     try {
       await writeSupabaseState(client, payload);
@@ -5069,7 +5452,7 @@ function flushSupabaseSyncQueue() {
 }
 
 function queueSupabaseSync(stateRaw) {
-  if (!getSupabaseClient()) return;
+  if (!canSyncToSupabase()) return;
   queuedSupabaseStateRaw = stateRaw;
   if (supabaseSyncTimer) clearTimeout(supabaseSyncTimer);
   supabaseSyncTimer = setTimeout(() => {
