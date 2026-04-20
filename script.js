@@ -125,6 +125,7 @@ let lastSupabaseSyncError = "";
 let supabaseAuthSession = null;
 let supabaseAuthListenerBound = false;
 let secureUsersLoaded = false;
+let supabaseLogoutInProgress = false;
 let currentThemePreference = "system";
 let systemThemeMediaQuery = null;
 let pendingGanttMeasureRetry = false;
@@ -166,6 +167,7 @@ function parseSupabaseStoredSession(rawValue) {
 }
 
 function readSupabaseStoredSession() {
+  if (supabaseLogoutInProgress) return null;
   try {
     const ref = getSupabaseProjectRef();
     const storage = window.localStorage;
@@ -602,6 +604,18 @@ function bindAuthActions() {
     const email = String(document.getElementById("loginEmail").value || "").trim().toLowerCase();
     const password = document.getElementById("loginPassword").value;
     if (isRemoteSupabaseAuthEnabled()) {
+      if (supabaseAuthSession?.access_token && normalizeUserEmail(getCurrentAuthEmail()) === email) {
+        const signedIn = await syncCurrentUserFromSupabaseSession({ persistUsers: true });
+        if (signedIn) {
+          clearLoginError();
+          loginForm.reset();
+          openTab("dashboard");
+          applyAuthVisibility();
+          ensureAuthSurfaceVisible();
+          renderAll();
+          return;
+        }
+      }
       const sent = await sendMagicLink(email, { allowCreate: true });
       if (!sent) return;
       showLoginError("Enviamos um link de acesso para o seu e-mail.", { tone: "success" });
@@ -987,9 +1001,13 @@ function ensureAuthSurfaceVisible() {
 }
 
 async function logoutCurrentUser() {
+  supabaseLogoutInProgress = true;
   currentUserId = "";
   persistSessionUser();
   if (isRemoteSupabaseAuthEnabled()) {
+    clearSupabaseStoredSession();
+    supabaseAuthSession = null;
+    secureUsersLoaded = false;
     try {
       await getSupabaseClient().auth.signOut({ scope: "local" });
     } catch (error) {
@@ -1005,6 +1023,11 @@ async function logoutCurrentUser() {
   applyAuthVisibility();
   ensureAuthSurfaceVisible();
   renderAll();
+  supabaseLogoutInProgress = false;
+  if (isRemoteSupabaseAuthEnabled() && !isLocalFileRuntime()) {
+    window.location.replace(`${window.location.pathname}${window.location.search}`);
+    return;
+  }
 }
 
 function showLoginError(message, { tone = "error" } = {}) {
