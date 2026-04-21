@@ -126,6 +126,7 @@ let supabaseAuthSession = null;
 let supabaseAuthListenerBound = false;
 let secureUsersLoaded = false;
 let supabaseLogoutInProgress = false;
+let remotePasswordPromptInProgress = false;
 let currentThemePreference = "system";
 let systemThemeMediaQuery = null;
 let pendingGanttMeasureRetry = false;
@@ -201,6 +202,34 @@ function hasPendingSupabaseAuthCallback() {
   } catch (_) {
     return false;
   }
+}
+
+function getSupabaseAuthCallbackMode() {
+  try {
+    const hash = String(window.location.hash || "");
+    const search = new URLSearchParams(window.location.search || "");
+    const type = String(search.get("type") || "").toLowerCase();
+    if (type === "recovery") return "recovery";
+    if (
+      hash.includes("access_token=") ||
+      hash.includes("refresh_token=") ||
+      search.has("code") ||
+      search.has("token_hash") ||
+      type === "magiclink"
+    ) {
+      return "magiclink";
+    }
+  } catch (_) {}
+  return "";
+}
+
+function clearSupabaseAuthCallbackUrl() {
+  try {
+    const url = new URL(window.location.href);
+    ["code", "token_hash", "type"].forEach((key) => url.searchParams.delete(key));
+    url.hash = "";
+    window.history.replaceState({}, document.title, `${url.pathname}${url.search}`);
+  } catch (_) {}
 }
 
 function setLoginProcessingState(active, message = "Validando acesso...") {
@@ -663,9 +692,13 @@ function bindAuthActions() {
           return;
         }
       }
-      const sent = await sendMagicLink(email, { allowCreate: true });
-      if (!sent) return;
-      showLoginError("Enviamos um link de acesso para o seu e-mail.", { tone: "success" });
+      const signedIn = await signInWithSupabasePassword(email, password);
+      if (!signedIn) return;
+      loginForm.reset();
+      openTab("dashboard");
+      applyAuthVisibility();
+      ensureAuthSurfaceVisible();
+      renderAll();
       return;
     }
     let user = authenticateUser(email, password);
@@ -697,7 +730,7 @@ function bindAuthActions() {
   forgotPasswordBtn.addEventListener("click", () => {
     if (isRemoteSupabaseAuthEnabled()) {
       const email = String(document.getElementById("loginEmail").value || "").trim().toLowerCase();
-      void sendMagicLink(email, { allowCreate: true, showGenericSuccess: true });
+      void sendSupabasePasswordReset(email, { showGenericSuccess: true });
       return;
     }
     void startForgotPasswordFlow();
@@ -705,7 +738,10 @@ function bindAuthActions() {
   firstAccessBtn?.addEventListener("click", () => {
     if (isRemoteSupabaseAuthEnabled()) {
       const email = String(document.getElementById("loginEmail").value || "").trim().toLowerCase();
-      void sendMagicLink(email, { allowCreate: true, showGenericSuccess: true });
+      void sendMagicLink(email, { allowCreate: true }).then((sent) => {
+        if (!sent) return;
+        showLoginError("Enviamos um link de primeiro acesso para você definir sua senha.", { tone: "success" });
+      });
       return;
     }
     void startFirstAccessFlow();
@@ -745,14 +781,11 @@ function updateLoginModeUi() {
   const forgotPasswordBtn = document.getElementById("forgotPasswordBtn");
   const firstAccessBtn = document.getElementById("firstAccessBtn");
   if (isRemoteSupabaseAuthEnabled()) {
-    if (passwordLabel) passwordLabel.hidden = true;
-    if (passwordInput) {
-      passwordInput.required = false;
-      passwordInput.value = "";
-    }
-    if (submitButton) submitButton.textContent = "Enviar link de acesso";
-    if (forgotPasswordBtn) forgotPasswordBtn.textContent = "Reenviar link";
-    if (firstAccessBtn) firstAccessBtn.hidden = true;
+    if (passwordLabel) passwordLabel.hidden = false;
+    if (passwordInput) passwordInput.required = true;
+    if (submitButton) submitButton.textContent = "Entrar";
+    if (forgotPasswordBtn) forgotPasswordBtn.textContent = "Esqueci minha senha!";
+    if (firstAccessBtn) firstAccessBtn.hidden = false;
     return;
   }
   if (passwordLabel) passwordLabel.hidden = false;
@@ -784,6 +817,87 @@ async function sendMagicLink(email, { allowCreate = false, showGenericSuccess = 
   }
   if (showGenericSuccess) showLoginError("Se o e-mail estiver autorizado, enviaremos um link de acesso.", { tone: "success" });
   return true;
+}
+
+async function signInWithSupabasePassword(email, password) {
+  if (!isRemoteSupabaseAuthEnabled()) return false;
+  const normalizedEmail = normalizeUserEmail(email);
+  const rawPassword = String(password || "");
+  if (!normalizedEmail || !rawPassword) {
+    showLoginError("Informe e-mail e senha.");
+    return false;
+  }
+  const client = getSupabaseClient();
+  const { data, error } = await client.auth.signInWithPassword({
+    email: normalizedEmail,
+    password: rawPassword
+  });
+  if (error) {
+    showLoginError("E-mail ou senha inválidos.");
+    console.warn("[Originais] Falha ao entrar com senha no Supabase.", error.message || error);
+    return false;
+  }
+  supabaseAuthSession = data?.session || supabaseAuthSession;
+  const signedIn = await syncCurrentUserFromSupabaseSession({ persistUsers: true });
+  if (!signedIn) return false;
+  persistSessionUser();
+  clearLoginError();
+  return true;
+}
+
+async function sendSupabasePasswordReset(email, { showGenericSuccess = false } = {}) {
+  if (!isRemoteSupabaseAuthEnabled()) return false;
+  const normalizedEmail = normalizeUserEmail(email);
+  if (!normalizedEmail) {
+    showLoginError("Informe o e-mail cadastrado.");
+    return false;
+  }
+  const client = getSupabaseClient();
+  const { error } = await client.auth.resetPasswordForEmail(normalizedEmail, {
+    redirectTo: `${window.location.origin}${window.location.pathname}?type=recovery`
+  });
+  if (error) {
+    showLoginError("Não foi possível enviar o link de recuperação agora.");
+    console.warn("[Originais] Falha ao enviar recuperação de senha.", error.message || error);
+    return false;
+  }
+  if (showGenericSuccess) showLoginError("Se o e-mail estiver autorizado, enviaremos um link para redefinir sua senha.", { tone: "success" });
+  return true;
+}
+
+async function promptRemotePasswordSetup({ contextLabel = "definir sua senha", required = false } = {}) {
+  if (!isRemoteSupabaseAuthEnabled() || remotePasswordPromptInProgress) return false;
+  if (!supabaseAuthSession?.user?.email) return false;
+  remotePasswordPromptInProgress = true;
+  try {
+    while (true) {
+      const first = prompt(`Para continuar, você precisa ${contextLabel}. Digite a nova senha (mínimo 6 caracteres):`);
+      if (!first) {
+        if (!required) return false;
+        alert("É necessário definir uma senha para continuar.");
+        continue;
+      }
+      if (String(first).length < 6) {
+        alert("A senha deve ter no mínimo 6 caracteres.");
+        continue;
+      }
+      const second = prompt("Confirme a nova senha:");
+      if (first !== second) {
+        alert("A confirmação da senha não confere.");
+        continue;
+      }
+      const { error } = await getSupabaseClient().auth.updateUser({ password: first });
+      if (error) {
+        alert("Não foi possível definir a senha agora.");
+        console.warn("[Originais] Falha ao atualizar senha do usuário.", error.message || error);
+        return false;
+      }
+      alert("Senha definida com sucesso. Nos próximos acessos, entre com e-mail e senha.");
+      return true;
+    }
+  } finally {
+    remotePasswordPromptInProgress = false;
+  }
 }
 
 async function syncCurrentUserFromSupabaseSession({ persistUsers = true } = {}) {
@@ -853,6 +967,7 @@ function bindSupabaseAuthListener() {
 
 async function initializeSupabaseAuth() {
   if (!isRemoteSupabaseAuthEnabled()) return;
+  const callbackMode = getSupabaseAuthCallbackMode();
   updateLoginModeUi();
   bindSupabaseAuthListener();
   if (!supabaseAuthSession) {
@@ -889,6 +1004,17 @@ async function initializeSupabaseAuth() {
     return;
   }
   persistSessionUser();
+  if (callbackMode) clearSupabaseAuthCallbackUrl();
+  if (callbackMode === "recovery") {
+    const updated = await promptRemotePasswordSetup({ contextLabel: "redefinir sua senha", required: true });
+    if (!updated) {
+      await logoutCurrentUser();
+      setLoginProcessingState(false);
+      return;
+    }
+  } else if (callbackMode === "magiclink") {
+    await promptRemotePasswordSetup({ contextLabel: "definir sua senha para os próximos acessos", required: true });
+  }
   setLoginProcessingState(false);
 }
 
@@ -1141,7 +1267,7 @@ async function startForgotPasswordFlow() {
   if (isRemoteSupabaseAuthEnabled()) {
     const email = prompt("Informe o e-mail cadastrado:");
     if (!email) return;
-    await sendMagicLink(email, { allowCreate: true, showGenericSuccess: true });
+    await sendSupabasePasswordReset(email, { showGenericSuccess: true });
     return;
   }
   const email = prompt("Informe o e-mail cadastrado:");
@@ -1440,6 +1566,10 @@ function bindDialog() {
       );
       try {
         await upsertSecureUserInSupabase(payload);
+        if (payload.password && normalizeUserEmail(payload.email) === normalizeUserEmail(getCurrentAuthEmail())) {
+          const { error } = await getSupabaseClient().auth.updateUser({ password: payload.password });
+          if (error) throw error;
+        }
         await refreshSecureUsersFromSupabase({ persist: true });
         if (isNewRemoteUser) {
           const sent = await sendMagicLink(payload.email, { allowCreate: true });
@@ -1487,7 +1617,7 @@ function bindDialog() {
         if (!sent) {
           alert("Usuário salvo, mas o e-mail do Magic Link não pôde ser enviado.");
         } else {
-          alert("Convite enviado por e-mail com sucesso.");
+          alert("Convite enviado por e-mail com sucesso. O usuário definirá a senha no primeiro acesso.");
         }
       } catch (error) {
         alert("Não foi possível convidar o usuário.");
@@ -2893,7 +3023,7 @@ function renderUsers() {
       const invitedAt = user.invitedAt ? formatDatePtBr(user.invitedAt) : "";
       const inviteText = invitedAt ? `Convidado em ${invitedAt}` : "Sem convite";
       const passwordState = isRemoteSupabaseAuthEnabled()
-        ? "Magic Link"
+        ? "Senha"
         : user.firstAccessPending
           ? "Primeiro acesso"
           : user.passwordHash
@@ -3011,11 +3141,14 @@ function openUserDialog(userId = null) {
   document.getElementById("userPasswordConfirm").value = "";
   const passwordHint = document.getElementById("userPasswordHint");
   if (isRemoteSupabaseAuthEnabled()) {
-    if (passwordLabel) passwordLabel.hidden = true;
-    if (passwordConfirmLabel) passwordConfirmLabel.hidden = true;
+    const isOwnProfile = Boolean(user && current && normalizeUserEmail(current.email) === normalizeUserEmail(user.email));
+    if (passwordLabel) passwordLabel.hidden = !isOwnProfile;
+    if (passwordConfirmLabel) passwordConfirmLabel.hidden = !isOwnProfile;
     if (passwordHint) {
       passwordHint.hidden = false;
-      passwordHint.textContent = "O acesso é feito por Magic Link enviado por e-mail.";
+      passwordHint.textContent = isOwnProfile
+        ? "Preencha os campos de acesso apenas se quiser alterar sua senha."
+        : "O usuário definirá a própria senha no primeiro acesso por e-mail.";
     }
   } else {
     if (passwordLabel) passwordLabel.hidden = false;
@@ -3056,6 +3189,14 @@ function collectUserForm() {
     alert("Já existe um usuário com esse e-mail.");
     return null;
   }
+  if ((password || passwordConfirm) && password !== passwordConfirm) {
+    alert("A confirmação da senha não confere.");
+    return null;
+  }
+  if (password && password.length < 6) {
+    alert("A senha deve ter no mínimo 6 caracteres.");
+    return null;
+  }
   if (isRemoteSupabaseAuthEnabled()) {
     if (existing?.email && normalizeUserEmail(existing.email) !== email) {
       alert("Para trocar o e-mail, cadastre um novo usuário e desative/exclua o anterior.");
@@ -3067,19 +3208,12 @@ function collectUserForm() {
       email,
       role: isAdmin ? (["ADMIN", "EDITOR", "LEITOR"].includes(role) ? role : "LEITOR") : String(existing?.role || current?.role || "LEITOR"),
       active: true,
-      invitedAt: existing?.invitedAt || new Date().toISOString()
+      invitedAt: existing?.invitedAt || new Date().toISOString(),
+      password: password || ""
     };
   }
   if ((!existing || !existing.passwordHash) && !password) {
     alert("Defina uma senha para o usuário.");
-    return null;
-  }
-  if ((password || passwordConfirm) && password !== passwordConfirm) {
-    alert("A confirmação da senha não confere.");
-    return null;
-  }
-  if (password && password.length < 6) {
-    alert("A senha deve ter no mínimo 6 caracteres.");
     return null;
   }
   return {
