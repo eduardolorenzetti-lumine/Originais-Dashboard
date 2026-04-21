@@ -10,7 +10,7 @@
 <body>
   <section id="loginView" class="login-view" hidden>
     <div class="login-card">
-      <div class="login-brand">
+      <a href="#" class="login-brand brand-link" data-go-home>
         <div class="logo-mark" aria-hidden="true">
           <span class="logo-l">L</span>
           <span class="logo-point"></span>
@@ -19,7 +19,7 @@
           <strong>ORIGINAIS</strong>
           <small>LUMINE</small>
         </div>
-      </div>
+      </a>
       <form id="loginForm" class="login-form" autocomplete="on">
         <label>E-mail
           <input id="loginEmail" type="email" required autocomplete="email" />
@@ -40,7 +40,7 @@
 
   <div id="appShell" class="app-shell" hidden>
     <aside class="sidebar">
-      <div class="brand">
+      <a href="#" class="brand brand-link" data-go-home>
         <div class="logo-mark" aria-hidden="true">
           <span class="logo-l">L</span>
           <span class="logo-point"></span>
@@ -49,7 +49,7 @@
           <strong>ORIGINAIS</strong>
           <small>LUMINE</small>
         </div>
-      </div>
+      </a>
 
       <nav class="side-nav">
         <button class="nav-btn active" data-tab="dashboard">Dashboard</button>
@@ -119,6 +119,18 @@
           <div class="filter-row">
             <strong>Duração:</strong>
             <div id="dashboardDurationChips" class="chips"></div>
+          </div>
+          <div class="filter-row">
+            <strong>Registros:</strong>
+            <div id="dashboardFlagChips" class="chips"></div>
+          </div>
+          <div class="filter-row">
+            <strong>Infantil:</strong>
+            <div id="dashboardInfantilChips" class="chips"></div>
+          </div>
+          <div class="filter-row">
+            <strong>Distribuição:</strong>
+            <div id="dashboardDistributionChips" class="chips"></div>
           </div>
           <div class="filter-row">
             <strong>Projeto:</strong>
@@ -207,6 +219,18 @@
             <div id="ganttDurationChips" class="chips"></div>
           </div>
           <div class="filter-row">
+            <strong>Registros:</strong>
+            <div id="ganttFlagChips" class="chips"></div>
+          </div>
+          <div class="filter-row">
+            <strong>Infantil:</strong>
+            <div id="ganttInfantilChips" class="chips"></div>
+          </div>
+          <div class="filter-row">
+            <strong>Distribuição:</strong>
+            <div id="ganttDistributionChips" class="chips"></div>
+          </div>
+          <div class="filter-row">
             <strong>Projeto:</strong>
             <div id="ganttProjectFilter"></div>
           </div>
@@ -278,6 +302,18 @@
               <div id="projectDurationChips" class="chips"></div>
             </div>
             <div class="filter-row">
+              <strong>Registros:</strong>
+              <div id="projectFlagChips" class="chips"></div>
+            </div>
+            <div class="filter-row">
+              <strong>Infantil:</strong>
+              <div id="projectInfantilChips" class="chips"></div>
+            </div>
+            <div class="filter-row">
+              <strong>Distribuição:</strong>
+              <div id="projectDistributionChips" class="chips"></div>
+            </div>
+            <div class="filter-row">
               <strong>Projeto:</strong>
               <div id="projectProjectFilter"></div>
             </div>
@@ -309,8 +345,10 @@
                 <th>Formato</th>
                 <th>Natureza</th>
                 <th>Duração</th>
-                <th>Gasto</th>
-                <th>Lançamento</th>
+                <th>Conteúdo Infantil</th>
+                <th>CPB</th>
+                <th>CRT</th>
+                <th>IMDb</th>
                 <th>Status</th>
                 <th>Ações</th>
               </tr>
@@ -391,6 +429,13 @@
         <label>Formato <select id="projectFormat"></select></label>
         <label>Natureza <select id="projectNature"></select></label>
         <label>Duração <select id="projectDuration"></select></label>
+        <label>Conteúdo Infantil
+          <select id="projectInfantilContent">
+            <option value="">Selecione</option>
+            <option value="Sim">Sim</option>
+            <option value="Não">Não</option>
+          </select>
+        </label>
         <label>Status <select id="projectStatus"></select></label>
         <label>Gasto (R$) <input id="projectBudget" type="text" inputmode="decimal" placeholder="R$ 0,00" /></label>
         <label>Lançamento
@@ -401,6 +446,14 @@
             </button>
             <input id="projectReleaseDatePicker" class="release-field-picker" type="date" lang="pt-BR" />
           </div>
+        </label>
+        <div class="project-flags-grid">
+          <label class="checkbox-inline"><input id="projectFlagCpb" type="checkbox" /> CPB</label>
+          <label class="checkbox-inline"><input id="projectFlagCrt" type="checkbox" /> CRT</label>
+          <label class="checkbox-inline"><input id="projectFlagImdb" type="checkbox" /> IMDb</label>
+        </div>
+        <label class="project-distribution-field">Distribuição
+          <div id="projectDistributionOptions" class="project-distribution-options"></div>
         </label>
       </div>
 

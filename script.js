@@ -23,6 +23,7 @@ const CONFIG_META = {
   formats: "FORMATO",
   natures: "NATUREZA",
   durations: "DURAÇÃO",
+  distributions: "DISTRIBUIÇÃO",
   statuses: "STATUS"
 };
 
@@ -32,6 +33,7 @@ const CONFIG_SINGULAR_META = {
   formats: "Formato",
   natures: "Natureza",
   durations: "Duração",
+  distributions: "Distribuição",
   statuses: "Status"
 };
 
@@ -79,6 +81,9 @@ let selectedDashboardFilters = {
   formats: new Set(),
   natures: new Set(),
   durations: new Set(),
+  flags: new Set(),
+  infantis: new Set(),
+  distributions: new Set(),
   projects: new Set()
 };
 let selectedGanttYears = new Set();
@@ -89,6 +94,9 @@ let selectedGanttFilters = {
   formats: new Set(),
   natures: new Set(),
   durations: new Set(),
+  flags: new Set(),
+  infantis: new Set(),
+  distributions: new Set(),
   projects: new Set()
 };
 let selectedProjectYears = new Set();
@@ -99,6 +107,9 @@ let selectedProjectFilters = {
   formats: new Set(),
   natures: new Set(),
   durations: new Set(),
+  flags: new Set(),
+  infantis: new Set(),
+  distributions: new Set(),
   projects: new Set()
 };
 const projectFilterQueries = {
@@ -139,8 +150,14 @@ const FIELD_TO_SETTINGS_KEY = {
   format: "formats",
   nature: "natures",
   duration: "durations",
+  distribution: "distributions",
   status: "statuses"
 };
+const PROJECT_FLAG_FIELDS = [
+  { key: "cpb", label: "CPB" },
+  { key: "crt", label: "CRT" },
+  { key: "imdb", label: "IMDb" }
+];
 
 function getSupabaseProjectRef() {
   const { url } = getSupabaseConfig();
@@ -398,6 +415,19 @@ function openTab(tab) {
 }
 
 function bindGlobalActions() {
+  document.querySelectorAll("[data-go-home]").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+      currentTab = "dashboard";
+      persistCurrentTab();
+      if (isAuthenticated()) {
+        openTab("dashboard");
+        return;
+      }
+      applyAuthVisibility();
+      ensureAuthSurfaceVisible();
+    });
+  });
   document.getElementById("btnNewProject").addEventListener("click", () => {
     if (!canEditContent()) {
       alert("Perfil LEITOR possui apenas visualização.");
@@ -1132,13 +1162,13 @@ function applyAuthVisibility() {
   const profileMenuUser = document.getElementById("profileMenuUser");
   if (!loginView || !appShell) return;
   const user = getCurrentUser();
-  const pendingAuth = !user && isRemoteSupabaseAuthEnabled() && hasPendingSupabaseAuthCallback();
+  const pendingAuth = isRemoteSupabaseAuthEnabled() && hasPendingSupabaseAuthCallback();
   const isAdmin = canManageUsers();
   const canEdit = canEditContent();
   const canSeeUsers = canViewUsers();
 
   loginView.hidden = Boolean(user) && !pendingAuth;
-  appShell.hidden = !user;
+  appShell.hidden = !user || pendingAuth;
   if (profileMenuList) profileMenuList.hidden = true;
   if (profileMenuUser) profileMenuUser.textContent = user ? `${user.name || "Usuário"} • ${user.role || "LEITOR"}` : "";
   const btnCreateUser = document.getElementById("btnCreateUser");
@@ -1759,6 +1789,9 @@ function filteredDashboardProjects() {
     if (!matchesMultiFilter(getNormalizedProjectField(p, "format", { strict: true }), selectedDashboardFilters.formats)) return false;
     if (!matchesMultiFilter(getNormalizedProjectField(p, "nature", { strict: true }), selectedDashboardFilters.natures)) return false;
     if (!matchesMultiFilter(getNormalizedProjectField(p, "duration", { strict: true }), selectedDashboardFilters.durations)) return false;
+    if (!matchesMultiFilter(getProjectInfantilValue(p), selectedDashboardFilters.infantis)) return false;
+    if (!matchesProjectFlagFilters(p, selectedDashboardFilters.flags)) return false;
+    if (!matchesMultiFilter(getProjectDistributions(p), selectedDashboardFilters.distributions)) return false;
     if (!matchesProjectFilter(p.id, selectedDashboardFilters.projects)) return false;
     return true;
   });
@@ -1774,11 +1807,16 @@ function renderDashboardExtraFilters() {
   const formatValues = uniq(state.settings.formats).filter(Boolean);
   const natureValues = uniq(state.settings.natures).filter(Boolean);
   const durationValues = uniq(state.settings.durations).filter(Boolean);
+  const distributionValues = uniq([...(state.settings.distributions || []), ...state.projects.flatMap((p) => getProjectDistributions(p))]).filter(Boolean);
+  const infantilValues = ["Sim", "Não"];
   sanitizeFilterSet(selectedDashboardFilters.statuses, statusValues);
   sanitizeFilterSet(selectedDashboardFilters.categories, categoryValues);
   sanitizeFilterSet(selectedDashboardFilters.formats, formatValues);
   sanitizeFilterSet(selectedDashboardFilters.natures, natureValues);
   sanitizeFilterSet(selectedDashboardFilters.durations, durationValues);
+  sanitizeFilterSet(selectedDashboardFilters.infantis, infantilValues);
+  sanitizeFilterSet(selectedDashboardFilters.distributions, distributionValues);
+  sanitizeFilterSet(selectedDashboardFilters.flags, PROJECT_FLAG_FIELDS.map((field) => field.key));
 
   renderDashboardFilterChips(
     document.getElementById("dashboardStatusChips"),
@@ -1810,6 +1848,22 @@ function renderDashboardExtraFilters() {
     selectedDashboardFilters.durations,
     "durations"
   );
+  renderDashboardFilterChips(
+    document.getElementById("dashboardInfantilChips"),
+    infantilValues,
+    selectedDashboardFilters.infantis,
+    "infantis"
+  );
+  renderProjectFlagFilterChips(
+    document.getElementById("dashboardFlagChips"),
+    selectedDashboardFilters.flags
+  );
+  renderDashboardFilterChips(
+    document.getElementById("dashboardDistributionChips"),
+    distributionValues,
+    selectedDashboardFilters.distributions,
+    "distributions"
+  );
   renderProjectPickerFilter(document.getElementById("dashboardProjectFilter"), selectedDashboardFilters.projects, "dashboard", () => renderDashboard());
 }
 
@@ -1835,6 +1889,31 @@ function renderDashboardFilterChips(container, values, selectedSet, key, onChang
       onChange();
     });
   });
+}
+
+function renderProjectFlagFilterChips(container, selectedSet, onChange = renderDashboard) {
+  if (!container) return;
+  const allActive = selectedSet.size === 0;
+  container.innerHTML = [
+    `<button class="chip ${allActive ? "active" : ""}" data-flag-filter="__all">Todos</button>`,
+    ...PROJECT_FLAG_FIELDS.map(
+      (field) => `<button class="chip ${selectedSet.has(field.key) ? "active" : ""}" data-flag-filter="${field.key}">${escapeHtml(field.label)}</button>`
+    )
+  ].join("");
+  container.querySelectorAll(".chip").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const key = String(chip.dataset.flagFilter || "");
+      if (key === "__all") selectedSet.clear();
+      else if (selectedSet.has(key)) selectedSet.delete(key);
+      else selectedSet.add(key);
+      onChange();
+    });
+  });
+}
+
+function matchesProjectFlagFilters(project, selectedSet) {
+  if (!selectedSet || selectedSet.size === 0) return true;
+  return [...selectedSet].every((flagKey) => Boolean(project?.[flagKey]));
 }
 
 function normalizeSearchText(value) {
@@ -1967,6 +2046,10 @@ function renderProjectPickerFilter(container, selectedSet, scopeKey, onChange) {
 
 function matchesMultiFilter(value, selectedSet) {
   if (!selectedSet || selectedSet.size === 0) return true;
+  if (Array.isArray(value)) {
+    const normalizedValues = value.map((item) => String(item || "").trim()).filter(Boolean);
+    return normalizedValues.some((item) => selectedSet.has(item));
+  }
   const normalized = String(value || "").trim();
   return normalized && selectedSet.has(normalized);
 }
@@ -1991,6 +2074,28 @@ function getProjectField(project, field) {
   if (field === "duration") return pick("duration", "duracao");
   if (field === "status") return pick("status");
   return pick(field);
+}
+
+function getProjectDistributions(project) {
+  const raw = project?.distributions;
+  if (Array.isArray(raw)) return uniq(raw.map((item) => String(item || "").trim()).filter(Boolean));
+  if (typeof raw === "string" && raw.trim()) {
+    return uniq(
+      raw
+        .split(/[;,|]/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    );
+  }
+  return [];
+}
+
+function getProjectInfantilValue(project) {
+  const raw = String(project?.infantilContent || project?.contentInfantil || "").trim().toLowerCase();
+  if (raw === "sim") return "Sim";
+  if (raw === "nao" || raw === "não") return "Não";
+  if (project?.infantil === true) return "Sim";
+  return "";
 }
 
 function normalizeValueBySettings(field, value, { strict = false } = {}) {
@@ -2412,6 +2517,16 @@ function renderGanttExtraFilters() {
   const formatValues = uniq([...(state.settings?.formats || []), ...state.projects.map((p) => getProjectField(p, "format"))]).filter(Boolean);
   const natureValues = uniq([...(state.settings?.natures || []), ...state.projects.map((p) => getProjectField(p, "nature"))]).filter(Boolean);
   const durationValues = uniq([...(state.settings?.durations || []), ...state.projects.map((p) => getProjectField(p, "duration"))]).filter(Boolean);
+  const distributionValues = uniq([...(state.settings?.distributions || []), ...state.projects.flatMap((p) => getProjectDistributions(p))]).filter(Boolean);
+  const infantilValues = ["Sim", "Não"];
+  sanitizeFilterSet(selectedGanttFilters.statuses, statusValues);
+  sanitizeFilterSet(selectedGanttFilters.categories, categoryValues);
+  sanitizeFilterSet(selectedGanttFilters.formats, formatValues);
+  sanitizeFilterSet(selectedGanttFilters.natures, natureValues);
+  sanitizeFilterSet(selectedGanttFilters.durations, durationValues);
+  sanitizeFilterSet(selectedGanttFilters.infantis, infantilValues);
+  sanitizeFilterSet(selectedGanttFilters.distributions, distributionValues);
+  sanitizeFilterSet(selectedGanttFilters.flags, PROJECT_FLAG_FIELDS.map((field) => field.key));
 
   renderDashboardFilterChips(
     document.getElementById("ganttStatusChips"),
@@ -2448,6 +2563,25 @@ function renderGanttExtraFilters() {
     "durations",
     () => renderGantt()
   );
+  renderDashboardFilterChips(
+    document.getElementById("ganttInfantilChips"),
+    infantilValues,
+    selectedGanttFilters.infantis,
+    "infantis",
+    () => renderGantt()
+  );
+  renderProjectFlagFilterChips(
+    document.getElementById("ganttFlagChips"),
+    selectedGanttFilters.flags,
+    () => renderGantt()
+  );
+  renderDashboardFilterChips(
+    document.getElementById("ganttDistributionChips"),
+    distributionValues,
+    selectedGanttFilters.distributions,
+    "distributions",
+    () => renderGantt()
+  );
   renderProjectPickerFilter(document.getElementById("ganttProjectFilter"), selectedGanttFilters.projects, "gantt", () => renderGantt());
 }
 
@@ -2459,6 +2593,9 @@ function filteredGanttProjects() {
     if (!matchesMultiFilter(getProjectField(p, "format"), selectedGanttFilters.formats)) return false;
     if (!matchesMultiFilter(getProjectField(p, "nature"), selectedGanttFilters.natures)) return false;
     if (!matchesMultiFilter(getProjectField(p, "duration"), selectedGanttFilters.durations)) return false;
+    if (!matchesMultiFilter(getProjectInfantilValue(p), selectedGanttFilters.infantis)) return false;
+    if (!matchesProjectFlagFilters(p, selectedGanttFilters.flags)) return false;
+    if (!matchesMultiFilter(getProjectDistributions(p), selectedGanttFilters.distributions)) return false;
     if (!matchesProjectFilter(p.id, selectedGanttFilters.projects)) return false;
     return true;
   });
@@ -2738,6 +2875,21 @@ function renderProjectsTools() {
   const toggle = document.getElementById("btnFilterProjects");
   panel.hidden = !projectFiltersOpen;
   setFilterToggleButton(toggle, projectFiltersOpen);
+  const projectStatusValues = uniq([...state.settings.statuses, ...state.projects.map((p) => getProjectField(p, "status"))]).filter(Boolean);
+  const projectCategoryValues = uniq([...state.settings.categories, ...state.projects.map((p) => getProjectField(p, "category"))]).filter(Boolean);
+  const projectFormatValues = uniq([...state.settings.formats, ...state.projects.map((p) => getProjectField(p, "format"))]).filter(Boolean);
+  const projectNatureValues = uniq([...state.settings.natures, ...state.projects.map((p) => getProjectField(p, "nature"))]).filter(Boolean);
+  const projectDurationValues = uniq([...state.settings.durations, ...state.projects.map((p) => getProjectField(p, "duration"))]).filter(Boolean);
+  const projectDistributionValues = uniq([...(state.settings.distributions || []), ...state.projects.flatMap((p) => getProjectDistributions(p))]).filter(Boolean);
+  const projectInfantilValues = ["Sim", "Não"];
+  sanitizeFilterSet(selectedProjectFilters.statuses, projectStatusValues);
+  sanitizeFilterSet(selectedProjectFilters.categories, projectCategoryValues);
+  sanitizeFilterSet(selectedProjectFilters.formats, projectFormatValues);
+  sanitizeFilterSet(selectedProjectFilters.natures, projectNatureValues);
+  sanitizeFilterSet(selectedProjectFilters.durations, projectDurationValues);
+  sanitizeFilterSet(selectedProjectFilters.infantis, projectInfantilValues);
+  sanitizeFilterSet(selectedProjectFilters.distributions, projectDistributionValues);
+  sanitizeFilterSet(selectedProjectFilters.flags, PROJECT_FLAG_FIELDS.map((field) => field.key));
 
   const years = [...new Set(state.projects.map((p) => getProjectYear(p)).filter((y) => y > 0))].sort((a, b) => a - b);
   const allActive = selectedProjectYears.size === 0;
@@ -2761,7 +2913,7 @@ function renderProjectsTools() {
 
   renderDashboardFilterChips(
     document.getElementById("projectStatusChips"),
-    uniq([...state.settings.statuses, ...state.projects.map((p) => getProjectField(p, "status"))]).filter(Boolean),
+    projectStatusValues,
     selectedProjectFilters.statuses,
     "statuses",
     () => {
@@ -2771,7 +2923,7 @@ function renderProjectsTools() {
   );
   renderDashboardFilterChips(
     document.getElementById("projectCategoryChips"),
-    uniq([...state.settings.categories, ...state.projects.map((p) => getProjectField(p, "category"))]).filter(Boolean),
+    projectCategoryValues,
     selectedProjectFilters.categories,
     "categories",
     () => {
@@ -2781,7 +2933,7 @@ function renderProjectsTools() {
   );
   renderDashboardFilterChips(
     document.getElementById("projectFormatChips"),
-    uniq([...state.settings.formats, ...state.projects.map((p) => getProjectField(p, "format"))]).filter(Boolean),
+    projectFormatValues,
     selectedProjectFilters.formats,
     "formats",
     () => {
@@ -2791,7 +2943,7 @@ function renderProjectsTools() {
   );
   renderDashboardFilterChips(
     document.getElementById("projectNatureChips"),
-    uniq([...state.settings.natures, ...state.projects.map((p) => getProjectField(p, "nature"))]).filter(Boolean),
+    projectNatureValues,
     selectedProjectFilters.natures,
     "natures",
     () => {
@@ -2800,10 +2952,38 @@ function renderProjectsTools() {
     }
   );
   renderDashboardFilterChips(
+    document.getElementById("projectInfantilChips"),
+    projectInfantilValues,
+    selectedProjectFilters.infantis,
+    "infantis",
+    () => {
+      renderProjectsTools();
+      renderProjectsTable();
+    }
+  );
+  renderDashboardFilterChips(
     document.getElementById("projectDurationChips"),
-    uniq([...state.settings.durations, ...state.projects.map((p) => getProjectField(p, "duration"))]).filter(Boolean),
+    projectDurationValues,
     selectedProjectFilters.durations,
     "durations",
+    () => {
+      renderProjectsTools();
+      renderProjectsTable();
+    }
+  );
+  renderProjectFlagFilterChips(
+    document.getElementById("projectFlagChips"),
+    selectedProjectFilters.flags,
+    () => {
+      renderProjectsTools();
+      renderProjectsTable();
+    }
+  );
+  renderDashboardFilterChips(
+    document.getElementById("projectDistributionChips"),
+    projectDistributionValues,
+    selectedProjectFilters.distributions,
+    "distributions",
     () => {
       renderProjectsTools();
       renderProjectsTable();
@@ -2828,13 +3008,16 @@ function renderProjectsTable() {
     if (!matchesMultiFilter(getProjectField(p, "format"), selectedProjectFilters.formats)) return false;
     if (!matchesMultiFilter(getProjectField(p, "nature"), selectedProjectFilters.natures)) return false;
     if (!matchesMultiFilter(getProjectField(p, "duration"), selectedProjectFilters.durations)) return false;
+    if (!matchesMultiFilter(getProjectInfantilValue(p), selectedProjectFilters.infantis)) return false;
+    if (!matchesProjectFlagFilters(p, selectedProjectFilters.flags)) return false;
+    if (!matchesMultiFilter(getProjectDistributions(p), selectedProjectFilters.distributions)) return false;
     if (!matchesProjectFilter(p.id, selectedProjectFilters.projects)) return false;
     return true;
   });
 
   const body = document.getElementById("projectsTableBody");
   if (!projects.length) {
-    body.innerHTML = '<tr><td colspan="10" class="empty">Nenhum projeto encontrado.</td></tr>';
+    body.innerHTML = '<tr><td colspan="12" class="empty">Nenhum projeto encontrado.</td></tr>';
     return;
   }
 
@@ -2843,14 +3026,18 @@ function renderProjectsTable() {
   const natures = uniq(state.settings.natures).filter(Boolean);
   const durations = uniq(state.settings.durations).filter(Boolean);
   const statuses = uniq(state.settings.statuses).filter(Boolean);
+  const renderFlagCell = (project, fieldKey) => {
+    const checked = Boolean(project[fieldKey]);
+    if (!editable) {
+      return `<label class="cell-inline-checkbox is-readonly"><input type="checkbox" ${checked ? "checked" : ""} disabled /><span></span></label>`;
+    }
+    return `<label class="cell-inline-checkbox"><input data-action="inline-flag" data-id="${project.id}" data-flag="${fieldKey}" type="checkbox" ${checked ? "checked" : ""} /><span></span></label>`;
+  };
 
   body.innerHTML = projects
     .map((p) => {
       const badgeClass = STATUS_COLORS[p.status] || "gray";
       const yearLabel = getProjectYearLabel(p);
-      const budgetValue = hasNumericValue(p.budget) ? Number(p.budget) : hasNumericValue(p.spent) ? Number(p.spent) : null;
-      const releaseDateIso = normalizeDateInput(p.releaseDate || "");
-      const releaseDateLabel = releaseDateIso ? formatDatePtBr(releaseDateIso) : "";
       const skuLabel = p.code ? `#${p.code}` : "";
       return `<tr>
         <td>${editable ? `<button class="btn light cell-link-edit" data-action="edit" data-id="${p.id}">${escapeHtml(skuLabel)}</button>` : `<span>${escapeHtml(skuLabel)}</span>`}</td>
@@ -2868,30 +3055,8 @@ function renderProjectsTable() {
         <td>${editable ? inlineSelect("format", p.id, getProjectField(p, "format"), formats) : escapeHtml(getProjectField(p, "format") || "—")}</td>
         <td>${editable ? inlineSelect("nature", p.id, getProjectField(p, "nature"), natures) : escapeHtml(getProjectField(p, "nature") || "—")}</td>
         <td>${editable ? inlineSelect("duration", p.id, getProjectField(p, "duration"), durations) : escapeHtml(getProjectField(p, "duration") || "—")}</td>
-        <td>${
-          editable
-            ? `<input class="cell-inline-input" data-action="inline-budget" data-id="${p.id}" type="text" inputmode="decimal" value="${escapeHtml(
-                formatCurrencyInputBRL(budgetValue)
-              )}" placeholder="R$ 0,00" />`
-            : escapeHtml(formatCurrencyInputBRL(budgetValue) || "—")
-        }</td>
-        <td>
-          ${
-            editable
-              ? `<div class="release-inline-wrap">
-            <input class="cell-inline-input release-inline-text${releaseDateIso ? " is-filled" : ""}" data-action="inline-release-date-text" data-id="${p.id}" type="text" inputmode="numeric" placeholder="dd/mm/aaaa" value="${escapeHtml(
-                releaseDateLabel
-              )}" />
-            <button type="button" class="btn light release-inline-btn" data-action="inline-release-date-open" title="Selecionar data" aria-label="Selecionar data">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h2v2h6V2h2v2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h3V2zm13 8H4v8h16v-8zM4 8h16V6H4v2z"/></svg>
-            </button>
-            <input class="release-inline-picker" data-action="inline-release-date-picker" data-id="${p.id}" type="date" lang="pt-BR" value="${escapeHtml(
-              releaseDateIso
-            )}" />
-          </div>`
-              : `<span class="${releaseDateIso ? "release-inline-text is-filled" : "release-inline-text"}">${escapeHtml(releaseDateLabel || "dd/mm/aaaa")}</span>`
-          }
-        </td>
+        <td>${editable ? inlineSelect("infantil", p.id, getProjectInfantilValue(p), ["Sim", "Não"]) : escapeHtml(getProjectInfantilValue(p) || "—")}</td>
+        ${PROJECT_FLAG_FIELDS.map((field) => `<td>${renderFlagCell(p, field.key)}</td>`).join("")}
         <td>${editable ? inlineSelect("status", p.id, getProjectField(p, "status"), statuses, badgeClass) : escapeHtml(getProjectField(p, "status") || "—")}</td>
         <td>
           ${
@@ -2928,81 +3093,16 @@ function renderProjectsTable() {
     });
   }
 
-  body.querySelectorAll("input[data-action='inline-budget']").forEach((el) => {
+  body.querySelectorAll("input[data-action='inline-flag']").forEach((el) => {
     el.addEventListener("change", () => {
       const project = state.projects.find((p) => p.id === el.dataset.id);
-      if (!project) return;
-      const raw = String(el.value || "").trim();
-      const parsed = parseCurrencyInputBRL(raw);
-      if (raw && parsed === null) {
-        alert("Valor de gasto inválido.");
-        renderProjectsTable();
-        return;
-      }
-      // Mantem compatibilidade com dados legados que usam "spent" como campo de gasto.
-      // Ao editar/limpar gasto na tabela, os dois campos precisam refletir o mesmo valor.
-      project.budget = parsed;
-      project.spent = parsed;
+      const field = String(el.dataset.flag || "").trim();
+      if (!project || !PROJECT_FLAG_FIELDS.some((item) => item.key === field)) return;
+      project[field] = Boolean(el.checked);
       saveState();
       renderProjectsTable();
       renderDashboard();
-    });
-  });
-
-  const commitReleaseDate = (projectId, rawValue) => {
-      const project = state.projects.find((p) => p.id === projectId);
-      if (!project) return;
-      const raw = String(rawValue || "").trim();
-      const normalized = normalizeDateInput(raw);
-      if (raw && !normalized) {
-        alert("Lançamento inválido. Use o calendário ou o formato dd/mm/aaaa.");
-        renderProjectsTable();
-        return;
-      }
-      const previousReleaseDate = normalizeDateInput(project.releaseDate || "") || "";
-      const nextReleaseDate = normalized || "";
-      if (previousReleaseDate === nextReleaseDate) return;
-      project.releaseDate = nextReleaseDate;
-      if (normalized) project.year = Number(normalized.slice(0, 4));
-      saveState();
-      renderProjectsTable();
       renderGantt();
-      renderDashboard();
-      renderProjectsTools();
-  };
-
-  body.querySelectorAll("input[data-action='inline-release-date-text']").forEach((el) => {
-    el.addEventListener("input", () => {
-      el.value = maskDateTextPtBr(el.value);
-      el.classList.toggle("is-filled", Boolean(String(el.value || "").trim()));
-    });
-    el.addEventListener("change", () => {
-      commitReleaseDate(el.dataset.id, el.value);
-    });
-    el.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") return;
-      event.preventDefault();
-      commitReleaseDate(el.dataset.id, el.value);
-      el.blur();
-    });
-    el.addEventListener("blur", () => {
-      commitReleaseDate(el.dataset.id, el.value);
-    });
-  });
-
-  body.querySelectorAll("input[data-action='inline-release-date-picker']").forEach((picker) => {
-    picker.addEventListener("change", () => {
-      commitReleaseDate(picker.dataset.id, picker.value);
-    });
-  });
-
-  body.querySelectorAll("button[data-action='inline-release-date-open']").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const wrap = btn.closest(".release-inline-wrap");
-      const picker = wrap?.querySelector("input[data-action='inline-release-date-picker']");
-      if (!picker) return;
-      if (typeof picker.showPicker === "function") picker.showPicker();
-      else picker.click();
     });
   });
 
@@ -3106,6 +3206,7 @@ function commitProjectInlineSelect(el) {
     format: "format",
     nature: "nature",
     duration: "duration",
+    infantil: "infantilContent",
     status: "status"
   };
   const projectField = fieldMap[field];
@@ -3298,6 +3399,7 @@ function openProjectDialog(projectId = null) {
   fillSelect("projectNature", state.settings.natures, project?.nature);
   fillSelect("projectDuration", state.settings.durations, project?.duration);
   fillSelect("projectStatus", ["", ...state.settings.statuses], project?.status || "");
+  renderProjectDistributionOptions(getProjectDistributions(project));
 
   document.getElementById("dialogTitle").textContent = project ? "Editar Projeto" : "Novo Projeto";
   document.getElementById("btnDeleteProject").style.visibility = project ? "visible" : "hidden";
@@ -3309,6 +3411,10 @@ function openProjectDialog(projectId = null) {
   document.getElementById("projectBudget").value = formatCurrencyInputBRL(
     hasNumericValue(project?.budget) ? Number(project.budget) : hasNumericValue(project?.spent) ? Number(project.spent) : null
   );
+  document.getElementById("projectFlagCpb").checked = Boolean(project?.cpb);
+  document.getElementById("projectFlagCrt").checked = Boolean(project?.crt);
+  document.getElementById("projectFlagImdb").checked = Boolean(project?.imdb);
+  document.getElementById("projectInfantilContent").value = getProjectInfantilValue(project);
   const releaseDate = normalizeDateInput(project?.releaseDate || "");
   document.getElementById("projectReleaseDateText").value = releaseDate ? formatDatePtBr(releaseDate) : "";
   document.getElementById("projectReleaseDatePicker").value = releaseDate;
@@ -3374,6 +3480,11 @@ function collectProjectForm() {
     format: document.getElementById("projectFormat").value,
     nature: document.getElementById("projectNature").value,
     duration: document.getElementById("projectDuration").value,
+    distributions: collectSelectedProjectDistributions(),
+    cpb: document.getElementById("projectFlagCpb").checked,
+    crt: document.getElementById("projectFlagCrt").checked,
+    imdb: document.getElementById("projectFlagImdb").checked,
+    infantilContent: document.getElementById("projectInfantilContent").value,
     status: document.getElementById("projectStatus").value,
     budget: parsedBudget,
     releaseDate: normalizedReleaseDate,
@@ -4370,6 +4481,29 @@ function fillSelect(id, list, selected) {
     .map((item) => `<option ${item === selected ? "selected" : ""}>${escapeHtml(item)}</option>`)
     .join("");
   if (!safeList.includes(selected)) el.value = safeList[0];
+}
+
+function renderProjectDistributionOptions(selectedValues = []) {
+  const container = document.getElementById("projectDistributionOptions");
+  if (!container) return;
+  const options = uniq([...(state.settings.distributions || []), ...selectedValues]).filter(Boolean);
+  const selected = new Set(selectedValues);
+  container.innerHTML = options.length
+    ? options
+        .map(
+          (item) =>
+            `<label class="checkbox-inline distribution-option"><input type="checkbox" data-distribution-option="${encodeURIComponent(item)}" ${selected.has(item) ? "checked" : ""} /> ${escapeHtml(item)}</label>`
+        )
+        .join("")
+    : '<span class="distribution-empty">Sem canais cadastrados.</span>';
+}
+
+function collectSelectedProjectDistributions() {
+  const container = document.getElementById("projectDistributionOptions");
+  if (!container) return [];
+  return [...container.querySelectorAll("input[data-distribution-option]:checked")]
+    .map((input) => decodeURIComponent(String(input.dataset.distributionOption || "")))
+    .filter(Boolean);
 }
 
 function monthsBetween(start, end) {
@@ -5372,6 +5506,12 @@ function normalizeProjectForMerge(project) {
     format: String(project.format || "").trim(),
     nature: String(project.nature || "").trim(),
     duration: String(project.duration || "").trim(),
+    distributions: getProjectDistributions(project),
+    cpb: Boolean(project.cpb),
+    crt: Boolean(project.crt),
+    imdb: Boolean(project.imdb),
+    infantilContent: getProjectInfantilValue(project),
+    infantil: getProjectInfantilValue(project) === "Sim",
     status: String(project.status || "").trim(),
     budget,
     spent,
@@ -6095,6 +6235,7 @@ function mergeState(parsed) {
     formats: pickArray(parsed?.settings?.formats, base.settings.formats),
     natures: pickArray(parsed?.settings?.natures, base.settings.natures),
     durations: pickArray(parsed?.settings?.durations, base.settings.durations),
+    distributions: pickArray(parsed?.settings?.distributions, base.settings.distributions),
     statuses: pickArray(parsed?.settings?.statuses, base.settings.statuses),
     stages: normalizeSettingsStages(pickArray(parsed?.settings?.stages, base.settings.stages), base.settings.stages)
   };
@@ -6153,6 +6294,7 @@ function seedState() {
     const cloned = structuredClone(window.BASE44_SEED);
     cloned.settings = cloned.settings || {};
     cloned.settings.stages = normalizeSettingsStages(cloned.settings.stages, []);
+    cloned.settings.distributions = pickArray(cloned.settings.distributions, ["Lumine", "Prime"]);
     cloned.users = Array.isArray(cloned.users) && cloned.users.length
       ? cloned.users.map((user) => ({
           id: user.id || uid(),
@@ -6236,6 +6378,7 @@ function seedState() {
       formats: ["Obra Não Seriada", "Série"],
       natures: ["Documental", "Ficção", "Animação"],
       durations: ["Média-metragem", "Curta-metragem", "Longa-metragem"],
+      distributions: ["Lumine", "Prime"],
       statuses: ["Em andamento", "Concluído", "Planejamento", "Pausado"],
       stages,
       itemColors: {
@@ -6296,6 +6439,12 @@ function projectSeed(code, title, year, category, format, nature, duration, stat
     format,
     nature,
     duration,
+    distributions: [],
+    cpb: false,
+    crt: false,
+    imdb: false,
+    infantilContent: "",
+    infantil: false,
     status,
     budget,
     releaseDate: "",
