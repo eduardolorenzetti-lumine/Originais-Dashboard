@@ -187,6 +187,32 @@ function readSupabaseStoredSession() {
   return null;
 }
 
+function hasPendingSupabaseAuthCallback() {
+  try {
+    const hash = String(window.location.hash || "");
+    const search = new URLSearchParams(window.location.search || "");
+    return (
+      hash.includes("access_token=") ||
+      hash.includes("refresh_token=") ||
+      search.has("code") ||
+      search.has("token_hash") ||
+      search.get("type") === "magiclink"
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function setLoginProcessingState(active, message = "Validando acesso...") {
+  const loginForm = document.getElementById("loginForm");
+  const status = document.getElementById("loginStatus");
+  if (loginForm) loginForm.classList.toggle("is-processing", Boolean(active));
+  if (status) {
+    status.hidden = !active;
+    status.textContent = active ? message : "";
+  }
+}
+
 function clearSupabaseStoredSession() {
   try {
     const ref = getSupabaseProjectRef();
@@ -280,6 +306,7 @@ function restoreCurrentTab() {
 }
 
 async function init() {
+  const pendingAuthCallback = isRemoteSupabaseAuthEnabled() && hasPendingSupabaseAuthCallback();
   state = loadState();
   const beforeHydrate = JSON.stringify(state);
   state = await hydrateStateFromIndexedDb(state);
@@ -302,18 +329,21 @@ async function init() {
   updateLoginModeUi();
   restoreSessionUser();
   restoreCurrentTab();
+  setLoginProcessingState(pendingAuthCallback);
   applyAuthVisibility();
   ensureAuthSurfaceVisible();
   renderAll();
-  void initializeSupabaseAuth()
+  const authInitPromise = initializeSupabaseAuth()
     .catch((error) => {
       console.warn("[Originais] Falha na inicialização assíncrona do auth.", error?.message || error);
     })
     .finally(() => {
+      setLoginProcessingState(false);
       applyAuthVisibility();
       ensureAuthSurfaceVisible();
       renderAll();
     });
+  if (pendingAuthCallback) await authInitPromise;
 }
 
 function bindNavigation() {
@@ -842,20 +872,24 @@ async function initializeSupabaseAuth() {
   const { data, error } = await getSupabaseClient().auth.getSession();
   if (error) {
     console.warn("[Originais] Falha ao obter sessão do Supabase.", error.message || error);
+    setLoginProcessingState(false);
     applyAuthVisibility();
     return;
   }
   supabaseAuthSession = data.session || null;
   if (!supabaseAuthSession) {
+    setLoginProcessingState(false);
     applyAuthVisibility();
     return;
   }
   const signedIn = await syncCurrentUserFromSupabaseSession({ persistUsers: true });
   if (!signedIn) {
+    setLoginProcessingState(false);
     applyAuthVisibility();
     return;
   }
   persistSessionUser();
+  setLoginProcessingState(false);
 }
 
 function authenticateUser(email, password) {
@@ -963,11 +997,12 @@ function applyAuthVisibility() {
   const profileMenuUser = document.getElementById("profileMenuUser");
   if (!loginView || !appShell) return;
   const user = getCurrentUser();
+  const pendingAuth = !user && isRemoteSupabaseAuthEnabled() && hasPendingSupabaseAuthCallback();
   const isAdmin = canManageUsers();
   const canEdit = canEditContent();
   const canSeeUsers = canViewUsers();
 
-  loginView.hidden = Boolean(user);
+  loginView.hidden = Boolean(user) && !pendingAuth;
   appShell.hidden = !user;
   if (profileMenuList) profileMenuList.hidden = true;
   if (profileMenuUser) profileMenuUser.textContent = user ? `${user.name || "Usuário"} • ${user.role || "LEITOR"}` : "";
@@ -1004,6 +1039,7 @@ function applyAuthVisibility() {
     document.getElementById(currentTab)?.classList.add("active");
     document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === currentTab && !b.hidden));
   }
+  setLoginProcessingState(pendingAuth);
   updateThemeOptionButtons();
 }
 
@@ -4464,16 +4500,13 @@ function stageDurationOptionValues() {
   return out;
 }
 
-function fillStageDurationOptions(select, selectedValue = 1) {
-  if (!select) return;
+function fillStageDurationOptions(input, selectedValue = 1) {
+  if (!input) return;
   const target = sanitizeStageDuration(selectedValue);
-  select.innerHTML = stageDurationOptionValues()
-    .map((value) => {
-      const label = Number.isInteger(value) ? String(value) : String(value).replace(".", ",");
-      return `<option value="${value}" ${value === target ? "selected" : ""}>${label}</option>`;
-    })
-    .join("");
-  select.value = String(target);
+  input.min = "0.5";
+  input.max = "240";
+  input.step = "0.5";
+  input.value = Number.isInteger(target) ? String(target) : String(target).replace(/\.0$/, "");
 }
 
 function timelineRangeLabel(start, end) {
