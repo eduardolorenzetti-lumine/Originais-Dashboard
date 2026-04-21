@@ -730,6 +730,10 @@ function bindAuthActions() {
   forgotPasswordBtn.addEventListener("click", () => {
     if (isRemoteSupabaseAuthEnabled()) {
       const email = String(document.getElementById("loginEmail").value || "").trim().toLowerCase();
+      if (supabaseAuthSession?.access_token && normalizeUserEmail(getCurrentAuthEmail()) === email) {
+        void promptRemotePasswordSetup({ contextLabel: "redefinir sua senha", required: true });
+        return;
+      }
       void sendSupabasePasswordReset(email, { showGenericSuccess: true });
       return;
     }
@@ -857,7 +861,12 @@ async function sendSupabasePasswordReset(email, { showGenericSuccess = false } =
     redirectTo: `${window.location.origin}${window.location.pathname}?type=recovery`
   });
   if (error) {
-    showLoginError("Não foi possível enviar o link de recuperação agora.");
+    const message = String(error.message || error || "").toLowerCase();
+    if (message.includes("rate limit") || message.includes("security purposes")) {
+      showLoginError("O Supabase bloqueou temporariamente novos e-mails. Aguarde alguns minutos e tente novamente.");
+    } else {
+      showLoginError("Não foi possível enviar o link de recuperação agora.");
+    }
     console.warn("[Originais] Falha ao enviar recuperação de senha.", error.message || error);
     return false;
   }
@@ -4480,8 +4489,7 @@ function addHalfMonths(period, halfSteps) {
 function stagePeriodHoverLabel(value, boundary = "start") {
   const parts = stagePeriodParts(value, boundary);
   if (!parts) return "";
-  const halfLabel = parts.half === 1 ? "1ª quinzena" : "2ª quinzena";
-  return `${monthHoverLabel(parts.monthIso)} • ${halfLabel}`;
+  return monthHoverLabel(parts.monthIso);
 }
 
 function stageYearBounds() {
