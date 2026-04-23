@@ -24,7 +24,9 @@ const CONFIG_META = {
   natures: "NATUREZA",
   durations: "DURAÇÃO",
   distributions: "DISTRIBUIÇÃO",
-  statuses: "STATUS"
+  statuses: "STATUS",
+  routeStatuses: "STATUS ROTA",
+  routeExclusivities: "EXCLUSIVIDADE ROTA"
 };
 
 const CONFIG_SINGULAR_META = {
@@ -34,10 +36,12 @@ const CONFIG_SINGULAR_META = {
   natures: "Natureza",
   durations: "Duração",
   distributions: "Distribuição",
-  statuses: "Status"
+  statuses: "Status",
+  routeStatuses: "Status da Rota",
+  routeExclusivities: "Exclusividade da Rota"
 };
 
-const COLOR_CONFIG_KEYS = new Set(["categories", "formats", "natures", "durations", "statuses"]);
+const COLOR_CONFIG_KEYS = new Set(["categories", "formats", "natures", "durations", "statuses", "routeStatuses", "routeExclusivities"]);
 
 const STATUS_COLORS = {
   Backlog: "gray",
@@ -112,13 +116,25 @@ let selectedProjectFilters = {
   distributions: new Set(),
   projects: new Set()
 };
+let routeFiltersOpen = false;
+let selectedRouteFilters = {
+  statuses: new Set(),
+  countries: new Set(),
+  resultYears: new Set(),
+  exclusivities: new Set()
+};
+let routeProjectDialogSelection = "";
 const projectFilterQueries = {
   dashboard: "",
   gantt: "",
-  projects: ""
+  projects: "",
+  routeCountries: "",
+  routeProjects: ""
 };
 let selectedConfigKey = "stages";
 let selectedStageRef = null;
+let routeSearchQuery = "";
+let collapsedRouteProjects = new Set();
 let draggingStage = null;
 let draggingRelease = null;
 let suppressLineClickUntil = 0;
@@ -144,7 +160,7 @@ let pendingGanttMeasureRetry = false;
 let ganttDelegatedBound = false;
 let ganttGhostActiveLine = null;
 let ganttPanState = null;
-const ALLOWED_TABS = new Set(["dashboard", "cronograma", "projetos", "usuarios", "configuracoes"]);
+const ALLOWED_TABS = new Set(["dashboard", "cronograma", "projetos", "rota", "usuarios", "configuracoes"]);
 const FIELD_TO_SETTINGS_KEY = {
   category: "categories",
   format: "formats",
@@ -470,6 +486,15 @@ function bindGlobalActions() {
   document.getElementById("timelineToday").addEventListener("click", centerTimelineOnCurrentMonth);
 
   document.getElementById("projectSearch").addEventListener("input", renderProjectsTable);
+  document.getElementById("routeSearch")?.addEventListener("input", (event) => {
+    routeSearchQuery = String(event.target.value || "");
+    renderRoute();
+  });
+  document.getElementById("btnAddRouteProject")?.addEventListener("click", () => openRouteProjectDialog());
+  document.getElementById("btnFilterRoute")?.addEventListener("click", () => {
+    routeFiltersOpen = !routeFiltersOpen;
+    renderRoute();
+  });
   document.getElementById("btnCreateUser").addEventListener("click", () => {
     if (!canManageUsers()) {
       alert("Apenas ADMIN pode gerir usuários.");
@@ -477,7 +502,7 @@ function bindGlobalActions() {
     }
     openUserDialog();
   });
-  document.getElementById("btnInviteUser").addEventListener("click", () => {
+  document.getElementById("btnInviteUser")?.addEventListener("click", () => {
     if (!canManageUsers()) {
       alert("Apenas ADMIN pode gerir usuários.");
       return;
@@ -760,6 +785,11 @@ function bindAuthActions() {
   forgotPasswordBtn.addEventListener("click", () => {
     if (isRemoteSupabaseAuthEnabled()) {
       const email = String(document.getElementById("loginEmail").value || "").trim().toLowerCase();
+      const localUser = (state.users || []).find((user) => normalizeUserEmail(user.email) === normalizeUserEmail(email));
+      if (localUser?.firstAccessPending) {
+        showLoginError('Esse usuário ainda não criou a senha. Use "Primeiro acesso".');
+        return;
+      }
       if (supabaseAuthSession?.access_token && normalizeUserEmail(getCurrentAuthEmail()) === email) {
         void promptRemotePasswordSetup({ contextLabel: "redefinir sua senha", required: true });
         return;
@@ -772,10 +802,8 @@ function bindAuthActions() {
   firstAccessBtn?.addEventListener("click", () => {
     if (isRemoteSupabaseAuthEnabled()) {
       const email = String(document.getElementById("loginEmail").value || "").trim().toLowerCase();
-      void sendMagicLink(email, { allowCreate: true }).then((sent) => {
-        if (!sent) return;
-        showLoginError("Enviamos um link de primeiro acesso para você definir sua senha.", { tone: "success" });
-      });
+      const password = String(document.getElementById("loginPassword").value || "");
+      void startRemoteFirstAccess(email, password);
       return;
     }
     void startFirstAccessFlow();
@@ -874,6 +902,7 @@ async function signInWithSupabasePassword(email, password) {
   supabaseAuthSession = data?.session || supabaseAuthSession;
   const signedIn = await syncCurrentUserFromSupabaseSession({ persistUsers: true });
   if (!signedIn) return false;
+  setUserFirstAccessPending(normalizedEmail, false);
   persistSessionUser();
   clearLoginError();
   return true;
@@ -901,6 +930,54 @@ async function sendSupabasePasswordReset(email, { showGenericSuccess = false } =
     return false;
   }
   if (showGenericSuccess) showLoginError("Se o e-mail estiver autorizado, enviaremos um link para redefinir sua senha.", { tone: "success" });
+  return true;
+}
+
+async function startRemoteFirstAccess(email, password) {
+  if (!isRemoteSupabaseAuthEnabled()) return false;
+  const normalizedEmail = normalizeUserEmail(email);
+  const rawPassword = String(password || "");
+  if (!normalizedEmail) {
+    showLoginError("Informe o e-mail cadastrado.");
+    return false;
+  }
+  if (!rawPassword || rawPassword.length < 6) {
+    showLoginError('Digite a senha desejada no campo "Senha" (mínimo 6 caracteres) e clique em "Primeiro acesso".');
+    return false;
+  }
+
+  const client = getSupabaseClient();
+  const { data, error } = await client.auth.signUp({
+    email: normalizedEmail,
+    password: rawPassword
+  });
+
+  if (error) {
+    const message = String(error.message || error || "").toLowerCase();
+    if (message.includes("already registered") || message.includes("already been registered") || message.includes("user already registered")) {
+      showLoginError('Esse acesso já foi criado. Faça login normalmente ou use "Esqueci minha senha!".');
+      return false;
+    }
+    showLoginError("Não foi possível concluir o primeiro acesso agora.");
+    console.warn("[Originais] Falha ao concluir primeiro acesso.", error.message || error);
+    return false;
+  }
+
+  if (data?.session) {
+    supabaseAuthSession = data.session;
+    const signedIn = await syncCurrentUserFromSupabaseSession({ persistUsers: true });
+    if (!signedIn) return false;
+    setUserFirstAccessPending(normalizedEmail, false);
+    persistSessionUser();
+    clearLoginError();
+    document.getElementById("loginForm")?.reset();
+    openTab("dashboard");
+    applyAuthVisibility();
+    renderAll();
+    return true;
+  }
+
+  showLoginError("Primeiro acesso concluído. Agora entre com e-mail e senha.", { tone: "success" });
   return true;
 }
 
@@ -1172,9 +1249,7 @@ function applyAuthVisibility() {
   if (profileMenuList) profileMenuList.hidden = true;
   if (profileMenuUser) profileMenuUser.textContent = user ? `${user.name || "Usuário"} • ${user.role || "LEITOR"}` : "";
   const btnCreateUser = document.getElementById("btnCreateUser");
-  const btnInviteUser = document.getElementById("btnInviteUser");
   if (btnCreateUser) btnCreateUser.hidden = !isAdmin;
-  if (btnInviteUser) btnInviteUser.hidden = !isAdmin;
   const usersNavBtn = document.querySelector('.nav-btn[data-tab="usuarios"]');
   if (usersNavBtn) usersNavBtn.hidden = !canSeeUsers;
 
@@ -1408,6 +1483,10 @@ function bindDialog() {
   const userForm = document.getElementById("userForm");
   const inviteDialog = document.getElementById("inviteDialog");
   const inviteForm = document.getElementById("inviteForm");
+  const routeItemDialog = document.getElementById("routeItemDialog");
+  const routeItemForm = document.getElementById("routeItemForm");
+  const routeProjectDialog = document.getElementById("routeProjectDialog");
+  const routeProjectForm = document.getElementById("routeProjectForm");
   const stageStartMonthInput = document.getElementById("stageStartMonth");
   const stageStartYearInput = document.getElementById("stageStartYear");
   const stageDurationInput = document.getElementById("stageDuration");
@@ -1428,6 +1507,9 @@ function bindDialog() {
     if (!id) return;
     if (!confirm("Excluir projeto?")) return;
     state.projects = state.projects.filter((p) => p.id !== id);
+    state.routeProjects = normalizeRouteProjectIds((state.routeProjects || []).filter((projectId) => projectId !== id));
+    state.routes = (state.routes || []).filter((item) => item.projectId !== id);
+    collapsedRouteProjects.delete(id);
     saveState();
     dialog.close();
     renderAll();
@@ -1609,11 +1691,8 @@ function bindDialog() {
           const { error } = await getSupabaseClient().auth.updateUser({ password: payload.password });
           if (error) throw error;
         }
+        setUserFirstAccessPending(payload.email, Boolean(payload.firstAccessPending));
         await refreshSecureUsersFromSupabase({ persist: true });
-        if (isNewRemoteUser) {
-          const sent = await sendMagicLink(payload.email, { allowCreate: true });
-          if (!sent) alert("Usuário salvo, mas o e-mail de acesso não pôde ser enviado agora.");
-        }
       } catch (error) {
         alert("Não foi possível salvar o usuário no Supabase.");
         console.warn("[Originais] Falha ao salvar usuário seguro.", error?.message || error);
@@ -1698,6 +1777,62 @@ function bindDialog() {
     inviteDialog.close();
     window.location.href = inviteLink;
   });
+
+  document.getElementById("btnCancelRouteProject")?.addEventListener("click", () => routeProjectDialog.close());
+  routeProjectForm?.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!canEditContent()) {
+      alert("Perfil LEITOR possui apenas visualização.");
+      return;
+    }
+    const projectId = String(routeProjectDialogSelection || "").trim();
+    if (!projectId) {
+      alert("Selecione um filme.");
+      return;
+    }
+    state.routeProjects = normalizeRouteProjectIds([...(state.routeProjects || []), projectId]);
+    collapsedRouteProjects.delete(projectId);
+    projectFilterQueries.routeProjects = "";
+    routeProjectDialogSelection = "";
+    saveState();
+    routeProjectDialog.close();
+    renderRoute();
+  });
+
+  document.getElementById("btnCancelRouteItem").addEventListener("click", () => routeItemDialog.close());
+  document.getElementById("btnDeleteRouteItem").addEventListener("click", () => {
+    if (!canEditContent()) {
+      alert("Perfil LEITOR possui apenas visualização.");
+      return;
+    }
+    const routeId = String(document.getElementById("routeItemId").value || "").trim();
+    if (!routeId) return;
+    if (!confirm("Excluir item da rota?")) return;
+    state.routes = (state.routes || []).filter((item) => item.id !== routeId);
+    saveState();
+    routeItemDialog.close();
+    renderRoute();
+  });
+  routeItemForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!canEditContent()) {
+      alert("Perfil LEITOR possui apenas visualização.");
+      return;
+    }
+    const item = collectRouteItemForm();
+    if (!item) return;
+    state.routeProjects = normalizeRouteProjectIds([...(state.routeProjects || []), item.projectId]);
+    const idx = (state.routes || []).findIndex((entry) => entry.id === item.id);
+    if (idx >= 0) {
+      state.routes[idx] = { ...state.routes[idx], ...item, createdAt: state.routes[idx].createdAt || item.createdAt };
+    } else {
+      state.routes.push(item);
+    }
+    saveState();
+    routeItemDialog.close();
+    collapsedRouteProjects.delete(item.projectId);
+    renderRoute();
+  });
 }
 
 function renderAll() {
@@ -1709,6 +1844,7 @@ function renderAll() {
   renderGantt();
   renderProjectsTools();
   renderProjectsTable();
+  renderRoute();
   renderUsers();
   renderConfigTabs();
   renderConfigList();
@@ -2044,6 +2180,85 @@ function renderProjectPickerFilter(container, selectedSet, scopeKey, onChange) {
   });
 }
 
+function renderValuePickerFilter(container, allItems, selectedSet, scopeKey, onChange, placeholder = "Buscar...") {
+  if (!container) return;
+  const options = uniq((allItems || []).map((item) => String(item || "").trim()).filter(Boolean));
+  const valid = new Set(options);
+  [...selectedSet].forEach((value) => {
+    if (!valid.has(value)) selectedSet.delete(value);
+  });
+
+  const query = String(projectFilterQueries[scopeKey] || "");
+  const selectedItems = [...selectedSet].filter((item) => valid.has(item));
+  const normalizedQuery = normalizeSearchText(query);
+  const suggestions = normalizedQuery
+    ? options
+        .filter((item) => !selectedSet.has(item))
+        .filter((item) => normalizeSearchText(item).includes(normalizedQuery))
+        .slice(0, 10)
+    : [];
+
+  const allActive = selectedSet.size === 0;
+  container.innerHTML = `<div class="project-picker">
+    <div class="project-picker-top">
+      <button class="chip ${allActive ? "active" : ""}" data-value-filter="all">Todos</button>
+      <div class="project-picker-input">
+        ${selectedItems
+          .map(
+            (item) =>
+              `<span class="project-token">${escapeHtml(item)}<button type="button" data-value-filter="remove" data-value="${encodeURIComponent(item)}" aria-label="Remover item">×</button></span>`
+          )
+          .join("")}
+        <input type="text" data-value-filter="query" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(query)}" />
+      </div>
+    </div>
+    <div class="project-picker-suggestions" data-value-filter="suggestions">${
+      normalizedQuery
+        ? suggestions.length
+          ? suggestions
+              .map((item) => `<button type="button" data-value-filter="add" data-value="${encodeURIComponent(item)}">${escapeHtml(item)}</button>`)
+              .join("")
+          : '<span class="project-picker-empty">Nenhum item encontrado.</span>'
+        : ""
+    }</div>
+  </div>`;
+
+  const queryInput = container.querySelector("[data-value-filter='query']");
+  const suggestionsWrap = container.querySelector("[data-value-filter='suggestions']");
+  queryInput?.addEventListener("input", () => {
+    projectFilterQueries[scopeKey] = queryInput.value;
+    renderValuePickerFilter(container, options, selectedSet, scopeKey, onChange, placeholder);
+  });
+  queryInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === "," || event.key === ";") {
+      event.preventDefault();
+      const first = suggestions[0];
+      if (!first) return;
+      selectedSet.add(first);
+      projectFilterQueries[scopeKey] = "";
+      onChange();
+    }
+  });
+  container.querySelector("[data-value-filter='all']")?.addEventListener("click", () => {
+    selectedSet.clear();
+    projectFilterQueries[scopeKey] = "";
+    onChange();
+  });
+  container.querySelectorAll("[data-value-filter='remove']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      selectedSet.delete(decodeURIComponent(String(btn.dataset.value || "")));
+      onChange();
+    });
+  });
+  suggestionsWrap?.querySelectorAll("[data-value-filter='add']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      selectedSet.add(decodeURIComponent(String(btn.dataset.value || "")));
+      projectFilterQueries[scopeKey] = "";
+      onChange();
+    });
+  });
+}
+
 function matchesMultiFilter(value, selectedSet) {
   if (!selectedSet || selectedSet.size === 0) return true;
   if (Array.isArray(value)) {
@@ -2096,6 +2311,253 @@ function getProjectInfantilValue(project) {
   if (raw === "nao" || raw === "não") return "Não";
   if (project?.infantil === true) return "Sim";
   return "";
+}
+
+function getRouteItemsForProject(projectId) {
+  return [...(state.routes || [])]
+    .filter((item) => item.projectId === projectId)
+    .sort((a, b) => {
+      const aDate = a.submissionDeadline || a.resultDate || "";
+      const bDate = b.submissionDeadline || b.resultDate || "";
+      if (aDate && bDate && aDate !== bDate) return aDate.localeCompare(bDate);
+      if (aDate && !bDate) return -1;
+      if (!aDate && bDate) return 1;
+      return String(a.name || "").localeCompare(String(b.name || ""), "pt-BR");
+    });
+}
+
+function getRouteSelectedProjects() {
+  const selectedIds = new Set(normalizeRouteProjectIds(state.routeProjects));
+  return sortedProjects(state.projects, "desc").filter((project) => selectedIds.has(project.id));
+}
+
+function fillRouteProjectPicker(selectedProjectId = "") {
+  const container = document.getElementById("routeProjectPicker");
+  if (!container) return;
+  routeProjectDialogSelection = String(selectedProjectId || "").trim();
+  const alreadySelected = new Set(normalizeRouteProjectIds(state.routeProjects));
+  const options = sortedProjects(state.projects, "desc")
+    .filter((project) => !alreadySelected.has(project.id) || project.id === selectedProjectId)
+    .map((project) => ({ id: project.id, label: getRouteProjectLabel(project) }));
+  const validIds = new Set(options.map((item) => item.id));
+  if (routeProjectDialogSelection && !validIds.has(routeProjectDialogSelection)) {
+    routeProjectDialogSelection = "";
+  }
+  const query = String(projectFilterQueries.routeProjects || "");
+  const selectedItem = options.find((item) => item.id === routeProjectDialogSelection) || null;
+  const normalizedQuery = normalizeSearchText(query);
+  const getSuggestions = () => {
+    const currentQuery = normalizeSearchText(projectFilterQueries.routeProjects || "");
+    const filtered = options.filter((item) => item.id !== routeProjectDialogSelection);
+    if (!currentQuery) return filtered.slice(0, 8);
+    return filtered.filter((item) => normalizeSearchText(item.label).includes(currentQuery)).slice(0, 10);
+  };
+  const renderSuggestionsHtml = () => {
+    const suggestions = getSuggestions();
+    const showList = normalizeSearchText(projectFilterQueries.routeProjects || "") || !selectedItem;
+    if (!showList) return "";
+    if (!suggestions.length) return '<span class="project-picker-empty">Nenhum filme encontrado.</span>';
+    return suggestions
+      .map((item) => `<button type="button" data-route-project-picker="add" data-id="${item.id}">${escapeHtml(item.label)}</button>`)
+      .join("");
+  };
+
+  container.innerHTML = `<div class="project-picker">
+    <div class="project-picker-top">
+      <div class="project-picker-input">
+        ${
+          selectedItem
+            ? `<span class="project-token">${escapeHtml(selectedItem.label)}<button type="button" data-route-project-picker="remove" data-id="${selectedItem.id}" aria-label="Remover filme">×</button></span>`
+            : ""
+        }
+        <input type="text" data-route-project-picker="query" placeholder="Buscar filme..." value="${escapeHtml(query)}" />
+      </div>
+    </div>
+    <div class="project-picker-suggestions" data-route-project-picker="suggestions">${renderSuggestionsHtml()}</div>
+  </div>`;
+
+  const queryInput = container.querySelector("[data-route-project-picker='query']");
+  const suggestionsWrap = container.querySelector("[data-route-project-picker='suggestions']");
+  queryInput?.addEventListener("input", () => {
+    projectFilterQueries.routeProjects = queryInput.value;
+    if (suggestionsWrap) suggestionsWrap.innerHTML = renderSuggestionsHtml();
+  });
+  queryInput?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === "," || event.key === ";") {
+      event.preventDefault();
+      const first = getSuggestions()[0];
+      if (!first) return;
+      projectFilterQueries.routeProjects = "";
+      fillRouteProjectPicker(first.id);
+    }
+  });
+  suggestionsWrap?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-route-project-picker='add']");
+    if (!btn) return;
+    projectFilterQueries.routeProjects = "";
+    fillRouteProjectPicker(btn.dataset.id);
+  });
+  container.querySelectorAll("[data-route-project-picker='remove']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      projectFilterQueries.routeProjects = "";
+      fillRouteProjectPicker("");
+    });
+  });
+}
+
+function openRouteProjectDialog() {
+  if (!canEditContent()) {
+    alert("Perfil LEITOR possui apenas visualização.");
+    return;
+  }
+  routeProjectDialogSelection = "";
+  projectFilterQueries.routeProjects = "";
+  fillRouteProjectPicker();
+  document.getElementById("routeProjectDialog").showModal();
+}
+
+function getRouteProjectLabel(project) {
+  const sku = String(project?.code || "").trim();
+  const title = String(project?.title || "").trim();
+  if (sku && title) return `#${sku} ${title}`;
+  return title || (sku ? `#${sku}` : "Projeto");
+}
+
+function formatRouteStatusLabel(value) {
+  const label = String(value || "").trim();
+  if (!label) return "";
+  const lower = label.toLocaleLowerCase("pt-BR");
+  return lower.charAt(0).toLocaleUpperCase("pt-BR") + lower.slice(1);
+}
+
+function routeItemMatchesQuery(item, query) {
+  if (!query) return true;
+  const haystack = normalizeSearchText(
+    [
+      item?.name,
+      item?.status,
+      item?.country,
+      item?.exclusivity,
+      item?.noticeUrl,
+      item?.driveUrl
+    ].join(" ")
+  );
+  return haystack.includes(query);
+}
+
+function getRouteResultYear(item) {
+  const normalized = normalizeDateInput(item?.resultDate || "");
+  return normalized ? normalized.slice(0, 4) : "";
+}
+
+function renderRouteStatusBadge(value) {
+  const label = String(value || "").trim();
+  if (!label) return "—";
+  const color = getConfigItemColor("routeStatuses", label, 0, true);
+  const style = color ? ` style="background:${hexToRgba(color, 0.18)}; border-color:${hexToRgba(color, 0.42)}; color:${color};"` : "";
+  return `<span class="route-pill"${style}>${escapeHtml(formatRouteStatusLabel(label))}</span>`;
+}
+
+function renderRouteExclusivityBadge(value) {
+  const label = String(value || "").trim();
+  if (!label) return "—";
+  const color = getConfigItemColor("routeExclusivities", label, 0, true);
+  const textColor = color && label === "Parcial [local]" ? "#6b4f00" : color || "var(--text)";
+  const style = color ? ` style="background:${hexToRgba(color, 0.18)}; border-color:${hexToRgba(color, 0.42)}; color:${textColor};"` : "";
+  return `<span class="route-pill"${style}>${escapeHtml(label)}</span>`;
+}
+
+function renderRouteLinkCell(url) {
+  const value = String(url || "").trim();
+  if (!value) return "—";
+  try {
+    const parsed = new URL(value);
+    const label = parsed.hostname.replace(/^www\./, "");
+    return `<a class="route-link" href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`;
+  } catch (_) {
+    return escapeHtml(value);
+  }
+}
+
+function routeInlineSelect(field, itemId, currentValue, options) {
+  const colorKey = field === "status" ? "routeStatuses" : field === "exclusivity" ? "routeExclusivities" : "";
+  const hexColor = colorKey ? getConfigItemColor(colorKey, currentValue, 0, true) : "";
+  const inlineStyle = hexColor ? ` style="background:${hexToRgba(hexColor, 0.16)};border-color:${hexToRgba(hexColor, 0.45)};color:${hexColor}"` : "";
+  return `<select class="cell-inline-select" data-route-inline="select" data-field="${field}" data-id="${itemId}"${inlineStyle}>
+    ${["", ...options.filter(Boolean)]
+      .map((value) => {
+        const label = field === "status" ? formatRouteStatusLabel(value) : value || "—";
+        return `<option value="${escapeHtml(value)}" ${String(currentValue || "") === String(value) ? "selected" : ""}>${escapeHtml(label)}</option>`;
+      })
+      .join("")}
+  </select>`;
+}
+
+function routeInlineText(field, itemId, currentValue, placeholder = "—") {
+  return `<input class="cell-inline-input" data-route-inline="text" data-field="${field}" data-id="${itemId}" value="${escapeHtml(currentValue || "")}" placeholder="${escapeHtml(placeholder)}" />`;
+}
+
+function routeInlineDate(field, itemId, currentValue) {
+  return `<input class="cell-inline-input" type="date" lang="pt-BR" data-route-inline="date" data-field="${field}" data-id="${itemId}" value="${escapeHtml(normalizeDateInput(currentValue || "") || "")}" />`;
+}
+
+function ensureRouteColumnResizers() {
+  const wrap = document.querySelector(".route-table-wrap");
+  const headers = wrap?.querySelectorAll("thead th");
+  const cols = wrap?.querySelectorAll("colgroup col");
+  if (!wrap || !headers?.length) return;
+  headers.forEach((th, index) => {
+    if (index === headers.length - 1 || th.querySelector(".route-col-resizer")) return;
+    const handle = document.createElement("span");
+    handle.className = "route-col-resizer";
+    handle.setAttribute("aria-hidden", "true");
+    handle.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      const columnNumber = index + 1;
+      const startX = event.clientX;
+      const targetCol = cols?.[index];
+      const startWidth = (targetCol || th).getBoundingClientRect().width;
+      const minWidth = columnNumber === 1 ? 220 : columnNumber >= 7 && columnNumber <= 8 ? 90 : 72;
+
+      const onMove = (moveEvent) => {
+        const nextWidth = Math.max(minWidth, startWidth + (moveEvent.clientX - startX));
+        if (targetCol) targetCol.style.width = `${nextWidth}px`;
+        else wrap.style.setProperty(`--route-col-${columnNumber}`, `${nextWidth}px`);
+      };
+
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    });
+    th.appendChild(handle);
+  });
+}
+
+function renderRouteLinkActions(url, itemId) {
+  const value = String(url || "").trim();
+  if (!value) return "—";
+  let label = value;
+  try {
+    label = new URL(value).hostname.replace(/^www\./, "");
+  } catch (_) {}
+  return `<div class="route-link-wrap">
+    <a class="route-link" href="${escapeHtml(value)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>
+    <span class="route-link-actions">
+      <button type="button" class="btn light icon-btn" data-route-link-action="copy" data-url="${escapeHtml(value)}" title="Copiar link" aria-label="Copiar link">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 1H6a2 2 0 0 0-2 2v12h2V3h10V1zm3 4H10a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H10V7h9v14z"/></svg>
+      </button>
+      <button type="button" class="btn light icon-btn" data-route-action="edit" data-id="${itemId}" title="Editar item" aria-label="Editar item">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zm2.92 2.33H5v-.92l9.06-9.06.92.92L5.92 19.58zM20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0l-1.54 1.54 3.75 3.75 1.54-1.55z"/></svg>
+      </button>
+      <button type="button" class="btn danger icon-btn" data-route-action="del" data-id="${itemId}" title="Excluir item" aria-label="Excluir item">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h5v2H3V5h5l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a2 2 0 0 0 2-2V8H4v11a2 2 0 0 0 2 2z"/></svg>
+      </button>
+    </span>
+  </div>`;
 }
 
 function normalizeValueBySettings(field, value, { strict = false } = {}) {
@@ -3110,10 +3572,233 @@ function renderProjectsTable() {
     btn.addEventListener("click", () => {
       if (!confirm("Excluir projeto?")) return;
       state.projects = state.projects.filter((p) => p.id !== btn.dataset.id);
+      state.routeProjects = normalizeRouteProjectIds((state.routeProjects || []).filter((projectId) => projectId !== btn.dataset.id));
+      state.routes = (state.routes || []).filter((item) => item.projectId !== btn.dataset.id);
+      collapsedRouteProjects.delete(btn.dataset.id);
       saveState();
       renderAll();
     });
   });
+}
+
+function renderRoute() {
+  const body = document.getElementById("routeTableBody");
+  const summary = document.getElementById("routeSummary");
+  const searchInput = document.getElementById("routeSearch");
+  const filtersPanel = document.getElementById("routeFiltersPanel");
+  const filterButton = document.getElementById("btnFilterRoute");
+  if (!body || !summary) return;
+  if (searchInput && searchInput.value !== routeSearchQuery) searchInput.value = routeSearchQuery;
+  if (filtersPanel) filtersPanel.hidden = !routeFiltersOpen;
+  setFilterToggleButton(filterButton, routeFiltersOpen);
+
+  const editable = canEditContent();
+  const query = normalizeSearchText(routeSearchQuery);
+  const projects = getRouteSelectedProjects();
+  const routeStatuses = uniq(state.settings.routeStatuses || []).filter(Boolean);
+  const routeExclusivities = uniq(state.settings.routeExclusivities || []).filter(Boolean);
+  const allRouteItems = projects.flatMap((project) => getRouteItemsForProject(project.id));
+  const routeCountries = uniq(
+    allRouteItems
+      .map((item) => String(item.country || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, "pt-BR"))
+  );
+  const routeResultYears = uniq(
+    allRouteItems
+      .map((item) => getRouteResultYear(item))
+      .filter(Boolean)
+      .sort((a, b) => Number(b) - Number(a))
+  );
+
+  sanitizeFilterSet(selectedRouteFilters.statuses, routeStatuses);
+  sanitizeFilterSet(selectedRouteFilters.countries, routeCountries);
+  sanitizeFilterSet(selectedRouteFilters.resultYears, routeResultYears);
+  sanitizeFilterSet(selectedRouteFilters.exclusivities, routeExclusivities);
+
+  renderDashboardFilterChips(document.getElementById("routeStatusChips"), routeStatuses, selectedRouteFilters.statuses, "route-statuses", renderRoute);
+  renderValuePickerFilter(document.getElementById("routeCountryFilter"), routeCountries, selectedRouteFilters.countries, "routeCountries", renderRoute, "Buscar país...");
+  renderDashboardFilterChips(document.getElementById("routeResultYearChips"), routeResultYears, selectedRouteFilters.resultYears, "route-result-years", renderRoute);
+  renderDashboardFilterChips(document.getElementById("routeExclusivityChips"), routeExclusivities, selectedRouteFilters.exclusivities, "route-exclusivities", renderRoute);
+
+  summary.innerHTML = editable
+    ? '<button id="btnAddRouteProject" class="btn accent" type="button">+ Adicionar Filme</button>'
+    : "";
+  document.getElementById("btnAddRouteProject")?.addEventListener("click", () => openRouteProjectDialog());
+
+  const visibleProjects = projects
+    .map((project) => {
+      const projectHit = query ? normalizeSearchText(`${project.code || ""} ${project.title || ""}`).includes(query) : false;
+      const hasRouteFilters =
+        selectedRouteFilters.statuses.size > 0 ||
+        selectedRouteFilters.countries.size > 0 ||
+        selectedRouteFilters.resultYears.size > 0 ||
+        selectedRouteFilters.exclusivities.size > 0;
+      const projectItems = getRouteItemsForProject(project.id).filter((item) => {
+        if (!matchesMultiFilter(String(item.status || "").trim(), selectedRouteFilters.statuses)) return false;
+        if (!matchesMultiFilter(String(item.country || "").trim(), selectedRouteFilters.countries)) return false;
+        if (!matchesMultiFilter(getRouteResultYear(item), selectedRouteFilters.resultYears)) return false;
+        if (!matchesMultiFilter(String(item.exclusivity || "").trim(), selectedRouteFilters.exclusivities)) return false;
+        if (!query) return true;
+        return projectHit || routeItemMatchesQuery(item, query);
+      });
+
+      if (!projectItems.length) {
+        if (hasRouteFilters) return null;
+        if (query && !projectHit) return null;
+      }
+
+      return { project, items: projectItems };
+    })
+    .filter(Boolean);
+
+  if (!visibleProjects.length) {
+    body.innerHTML = `<tr><td colspan="9" class="empty">${
+      projects.length ? "Nenhum item encontrado para a busca atual." : "Nenhum filme adicionado à Rota."
+    }</td></tr>`;
+    return;
+  }
+
+  body.innerHTML = visibleProjects
+    .map(({ project, items: projectItems }) => {
+      const count = projectItems.length;
+      const collapsed = collapsedRouteProjects.has(project.id);
+
+      const projectRow = `<tr class="route-project-row">
+        <td>
+          <div class="route-project-cell">
+            <button type="button" class="btn light route-toggle-btn" data-route-action="toggle" data-project-id="${project.id}" aria-label="${collapsed ? "Expandir" : "Recolher"}">
+              ${collapsed ? "▸" : "▾"}
+            </button>
+            <div class="route-project-copy">
+              <span class="route-project-title">${escapeHtml(project.title || "Projeto sem título")}</span>
+              <span class="route-project-meta">${escapeHtml(project.code ? `#${project.code}` : "")}${count ? ` • ${count} item${count === 1 ? "" : "s"}` : ""}</span>
+            </div>
+          </div>
+        </td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td></td>
+        <td>
+          ${
+            editable
+              ? `<div class="route-project-actions">
+                  <button type="button" class="btn accent route-add-btn" data-route-action="add" data-project-id="${project.id}" title="Adicionar festival ou prêmio" aria-label="Adicionar festival ou prêmio">+</button>
+                  <button type="button" class="btn danger icon-btn" data-route-action="remove-project" data-project-id="${project.id}" title="Remover filme da Rota" aria-label="Remover filme da Rota">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h5v2H3V5h5l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a2 2 0 0 0 2-2V8H4v11a2 2 0 0 0 2 2z"/></svg>
+                  </button>
+                </div>`
+              : ''
+          }
+        </td>
+      </tr>`;
+
+      if (collapsed) return projectRow;
+      if (!projectItems.length) {
+        return `${projectRow}<tr class="route-empty-row"><td colspan="9">Nenhum festival ou prêmio cadastrado para este filme.</td></tr>`;
+      }
+
+      const children = projectItems
+        .map((item) => `<tr class="route-item-row">
+          <td>
+            <div class="route-item-title-wrap">
+              <span class="route-item-indent"></span>
+              <span class="route-item-title">${escapeHtml(item.name || "")}</span>
+            </div>
+          </td>
+          <td>${editable ? routeInlineSelect("status", item.id, item.status, routeStatuses) : renderRouteStatusBadge(item.status)}</td>
+          <td>${editable ? routeInlineText("country", item.id, item.country, "País") : escapeHtml(item.country || "—")}</td>
+          <td>${editable ? routeInlineDate("submissionDeadline", item.id, item.submissionDeadline) : escapeHtml(formatDatePtBr(item.submissionDeadline) || "—")}</td>
+          <td>${editable ? routeInlineDate("resultDate", item.id, item.resultDate) : escapeHtml(formatDatePtBr(item.resultDate) || "—")}</td>
+          <td>${editable ? routeInlineSelect("exclusivity", item.id, item.exclusivity, routeExclusivities) : renderRouteExclusivityBadge(item.exclusivity)}</td>
+          <td>${renderRouteLinkActions(item.noticeUrl, item.id)}</td>
+          <td>${renderRouteLinkActions(item.driveUrl, item.id)}</td>
+          <td>
+            ${
+              editable
+                ? `<button type="button" class="btn light icon-btn" data-route-action="edit" data-id="${item.id}" title="Editar item da rota" aria-label="Editar item da rota">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zm2.92 2.33H5v-.92l9.06-9.06.92.92L5.92 19.58zM20.71 7.04a1 1 0 0 0 0-1.41L18.37 3.3a1 1 0 0 0-1.41 0l-1.54 1.54 3.75 3.75 1.54-1.55z"/></svg>
+            </button>`
+                : ''
+            }
+          </td>
+        </tr>`)
+        .join("");
+
+      return `${projectRow}${children}`;
+    })
+    .join("");
+
+  body.querySelectorAll("[data-route-action='toggle']").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const projectId = btn.dataset.projectId;
+      if (!projectId) return;
+      if (collapsedRouteProjects.has(projectId)) collapsedRouteProjects.delete(projectId);
+      else collapsedRouteProjects.add(projectId);
+      renderRoute();
+    });
+  });
+
+  if (editable) {
+    body.querySelectorAll("[data-route-action='remove-project']").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const projectId = btn.dataset.projectId;
+        if (!projectId) return;
+        if (!confirm("Remover este filme da Rota? Os festivais e prêmios vinculados também serão excluídos.")) return;
+        state.routeProjects = normalizeRouteProjectIds((state.routeProjects || []).filter((id) => id !== projectId));
+        state.routes = (state.routes || []).filter((item) => item.projectId !== projectId);
+        collapsedRouteProjects.delete(projectId);
+        saveState();
+        renderRoute();
+      });
+    });
+    body.querySelectorAll("[data-route-action='add']").forEach((btn) => {
+      btn.addEventListener("click", () => openRouteItemDialog(null, btn.dataset.projectId));
+    });
+    body.querySelectorAll("[data-route-action='edit']").forEach((btn) => {
+      btn.addEventListener("click", () => openRouteItemDialog(btn.dataset.id));
+    });
+    body.querySelectorAll("[data-route-action='del']").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (!confirm("Excluir item da rota?")) return;
+        state.routes = (state.routes || []).filter((item) => item.id !== btn.dataset.id);
+        saveState();
+        renderRoute();
+      });
+    });
+    body.querySelectorAll("select[data-route-inline='select']").forEach((el) => {
+      el.addEventListener("change", () => commitRouteInlineField(el));
+    });
+    body.querySelectorAll("input[data-route-inline='text']").forEach((el) => {
+      el.addEventListener("blur", () => commitRouteInlineField(el));
+      el.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commitRouteInlineField(el);
+        }
+      });
+    });
+    body.querySelectorAll("input[data-route-inline='date']").forEach((el) => {
+      el.addEventListener("change", () => commitRouteInlineField(el));
+    });
+    body.querySelectorAll("[data-route-link-action='copy']").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const url = String(btn.dataset.url || "");
+        if (!url) return;
+        try {
+          await navigator.clipboard.writeText(url);
+        } catch (_) {
+          alert("Não foi possível copiar o link.");
+        }
+      });
+    });
+  }
+
+  ensureRouteColumnResizers();
 }
 
 function renderUsers() {
@@ -3219,6 +3904,23 @@ function commitProjectInlineSelect(el) {
   renderGantt();
 }
 
+function commitRouteInlineField(el) {
+  if (!el) return;
+  const item = (state.routes || []).find((entry) => entry.id === el.dataset.id);
+  if (!item) return;
+  const field = String(el.dataset.field || "").trim();
+  let nextValue = "";
+  if (el.dataset.routeInline === "date") nextValue = normalizeDateInput(el.value || "");
+  else nextValue = String(el.value || "").trim();
+  const allowedFields = new Set(["status", "country", "submissionDeadline", "resultDate", "exclusivity"]);
+  if (!allowedFields.has(field)) return;
+  const currentValue = String(item[field] || "").trim();
+  if (currentValue === nextValue) return;
+  item[field] = nextValue;
+  saveState();
+  renderRoute();
+}
+
 function openUserDialog(userId = null) {
   const dialog = document.getElementById("userDialog");
   const current = getCurrentUser();
@@ -3258,7 +3960,7 @@ function openUserDialog(userId = null) {
       passwordHint.hidden = false;
       passwordHint.textContent = isOwnProfile
         ? "Preencha os campos de acesso apenas se quiser alterar sua senha."
-        : "O usuário definirá a própria senha no primeiro acesso por e-mail.";
+        : 'O usuário definirá a própria senha no botão "Primeiro acesso".';
     }
   } else {
     if (passwordLabel) passwordLabel.hidden = false;
@@ -3295,7 +3997,7 @@ function collectUserForm() {
     alert("E-mail inválido.");
     return null;
   }
-  if (state.users.some((user) => user.id !== id && String(user.email || "").toLowerCase() === email)) {
+  if (state.users.some((user) => user.id !== id && String(user.email || "").toLowerCase() === email && user.active !== false)) {
     alert("Já existe um usuário com esse e-mail.");
     return null;
   }
@@ -3319,7 +4021,8 @@ function collectUserForm() {
       role: isAdmin ? (["ADMIN", "EDITOR", "LEITOR"].includes(role) ? role : "LEITOR") : String(existing?.role || current?.role || "LEITOR"),
       active: true,
       invitedAt: existing?.invitedAt || new Date().toISOString(),
-      password: password || ""
+      password: password || "",
+      firstAccessPending: existing ? Boolean(existing.firstAccessPending) : !Boolean(password)
     };
   }
   if ((!existing || !existing.passwordHash) && !password) {
@@ -3492,6 +4195,76 @@ function collectProjectForm() {
     spent: parsedBudget,
     notes: document.getElementById("projectNotes").value.trim(),
     stages
+  };
+}
+
+function openRouteItemDialog(routeItemId = null, forcedProjectId = "") {
+  if (!canEditContent()) {
+    alert("Perfil LEITOR possui apenas visualização.");
+    return;
+  }
+  const item = (state.routes || []).find((entry) => entry.id === routeItemId) || null;
+  const dialog = document.getElementById("routeItemDialog");
+  const selectedProjectId = item?.projectId || forcedProjectId || state.projects[0]?.id || "";
+  const selectedProject = state.projects.find((project) => project.id === selectedProjectId);
+  fillSelect("routeItemStatus", ["", ...(state.settings.routeStatuses || [])], item?.status || "");
+  fillSelect("routeItemExclusivity", ["", ...(state.settings.routeExclusivities || [])], item?.exclusivity || "");
+  document.querySelectorAll("#routeItemStatus option").forEach((option) => {
+    option.textContent = option.value ? formatRouteStatusLabel(option.value) : "—";
+  });
+  document.getElementById("routeItemDialogTitle").textContent = item ? "Editar Festival / Prêmio" : "Novo Festival / Prêmio";
+  document.getElementById("routeItemProjectLabel").textContent = selectedProject ? getRouteProjectLabel(selectedProject) : "";
+  document.getElementById("routeItemId").value = item?.id || uid();
+  document.getElementById("routeProjectId").value = selectedProjectId;
+  document.getElementById("routeItemName").value = item?.name || "";
+  document.getElementById("routeItemCountry").value = item?.country || "";
+  document.getElementById("routeItemDeadline").value = normalizeDateInput(item?.submissionDeadline || "");
+  document.getElementById("routeItemResultDate").value = normalizeDateInput(item?.resultDate || "");
+  document.getElementById("routeItemNoticeUrl").value = item?.noticeUrl || "";
+  document.getElementById("routeItemDriveUrl").value = item?.driveUrl || "";
+  document.getElementById("btnDeleteRouteItem").style.visibility = item ? "visible" : "hidden";
+  dialog.showModal();
+}
+
+function collectRouteItemForm() {
+  const projectId = String(document.getElementById("routeProjectId").value || "").trim();
+  const name = String(document.getElementById("routeItemName").value || "").trim();
+  const deadline = normalizeDateInput(document.getElementById("routeItemDeadline").value || "");
+  const resultDate = normalizeDateInput(document.getElementById("routeItemResultDate").value || "");
+  const noticeUrl = String(document.getElementById("routeItemNoticeUrl").value || "").trim();
+  const driveUrl = String(document.getElementById("routeItemDriveUrl").value || "").trim();
+  if (!projectId) {
+    alert("Selecione o filme.");
+    return null;
+  }
+  if (!name) {
+    alert("Preencha o nome do festival ou prêmio.");
+    return null;
+  }
+  const validateUrl = (value, label) => {
+    if (!value) return true;
+    try {
+      const parsed = new URL(value);
+      return ["http:", "https:"].includes(parsed.protocol);
+    } catch (_) {
+      alert(`${label} inválido. Use um link completo começando com http:// ou https://.`);
+      return false;
+    }
+  };
+  if (!validateUrl(noticeUrl, "Edital")) return null;
+  if (!validateUrl(driveUrl, "Drive / URL")) return null;
+  return {
+    id: String(document.getElementById("routeItemId").value || "").trim() || uid(),
+    projectId,
+    name,
+    status: document.getElementById("routeItemStatus").value,
+    country: String(document.getElementById("routeItemCountry").value || "").trim(),
+    submissionDeadline: deadline,
+    resultDate,
+    exclusivity: document.getElementById("routeItemExclusivity").value,
+    noticeUrl,
+    driveUrl,
+    createdAt: new Date().toISOString()
   };
 }
 
@@ -4898,7 +5671,9 @@ const DEFAULT_ITEM_COLOR_PALETTES = {
   formats: ["#60a5fa", "#34d399", "#f472b6", "#f59e0b", "#a78bfa", "#22c55e"],
   natures: ["#10b981", "#0ea5e9", "#f97316", "#ef4444", "#8b5cf6", "#14b8a6"],
   durations: ["#f59e0b", "#14b8a6", "#6366f1", "#0ea5e9", "#16a34a", "#eab308"],
-  statuses: ["#3b82f6", "#10b981", "#f59e0b", "#94a3b8", "#f97316", "#64748b"]
+  statuses: ["#3b82f6", "#10b981", "#f59e0b", "#94a3b8", "#f97316", "#64748b"],
+  routeStatuses: ["#9ca3af", "#f97316", "#fbbf24", "#7c3aed", "#ec4899", "#4f46e5", "#3b82f6", "#10b981", "#ea580c", "#16a34a"],
+  routeExclusivities: ["#ec4899", "#3b82f6", "#facc15", "#e5e7eb"]
 };
 
 function normalizeHexColor(value) {
@@ -4943,7 +5718,9 @@ function buildDefaultItemColors(settings = {}) {
     formats: arrayToColorMap(settings.formats, DEFAULT_ITEM_COLOR_PALETTES.formats),
     natures: arrayToColorMap(settings.natures, DEFAULT_ITEM_COLOR_PALETTES.natures),
     durations: arrayToColorMap(settings.durations, DEFAULT_ITEM_COLOR_PALETTES.durations),
-    statuses: arrayToColorMap(settings.statuses, DEFAULT_ITEM_COLOR_PALETTES.statuses)
+    statuses: arrayToColorMap(settings.statuses, DEFAULT_ITEM_COLOR_PALETTES.statuses),
+    routeStatuses: arrayToColorMap(settings.routeStatuses, DEFAULT_ITEM_COLOR_PALETTES.routeStatuses),
+    routeExclusivities: arrayToColorMap(settings.routeExclusivities, DEFAULT_ITEM_COLOR_PALETTES.routeExclusivities)
   };
 }
 
@@ -5320,9 +6097,42 @@ function sanitizeUserForState(user) {
   };
 }
 
+function setUserFirstAccessPending(email, pending) {
+  const normalizedEmail = normalizeUserEmail(email);
+  if (!normalizedEmail) return;
+  const existing = Array.isArray(state.users)
+    ? state.users.find((user) => normalizeUserEmail(user.email) === normalizedEmail)
+    : null;
+  if (existing) {
+    existing.firstAccessPending = Boolean(pending);
+    return;
+  }
+  state.users = Array.isArray(state.users) ? state.users : [];
+  state.users.push({
+    id: normalizedEmail,
+    name: displayNameFromEmail(normalizedEmail),
+    email: normalizedEmail,
+    role: "LEITOR",
+    active: true,
+    invitedAt: new Date().toISOString(),
+    firstAccessPending: Boolean(pending)
+  });
+}
+
 function setManagedUsers(users = [], { persist = false } = {}) {
+  const previousByEmail = new Map(
+    (Array.isArray(state.users) ? state.users : [])
+      .map((user) => [normalizeUserEmail(user?.email), user])
+      .filter(([email]) => Boolean(email))
+  );
   const normalized = (Array.isArray(users) ? users : []).map(sanitizeUserForState).filter(Boolean);
-  state.users = normalized;
+  state.users = normalized.map((user) => {
+    const previous = previousByEmail.get(normalizeUserEmail(user.email));
+    return {
+      ...user,
+      firstAccessPending: Boolean(previous?.firstAccessPending)
+    };
+  });
   secureUsersLoaded = true;
   if (persist) saveState({ skipSupabase: true });
 }
@@ -5487,6 +6297,32 @@ function normalizeStageForMerge(stage) {
     name: String(stage.name || "").trim(),
     notes: String(stage.notes || "").trim()
   };
+}
+
+function normalizeRouteItemForMerge(item) {
+  if (!item || typeof item !== "object") return null;
+  const id = String(item.id || "").trim();
+  const projectId = String(item.projectId || "").trim();
+  const name = String(item.name || item.title || "").trim();
+  if (!id || !projectId || !name) return null;
+  return {
+    id,
+    projectId,
+    name,
+    status: String(item.status || "").trim(),
+    country: String(item.country || "").trim(),
+    submissionDeadline: normalizeDateInput(item.submissionDeadline || item.deadline || ""),
+    resultDate: normalizeDateInput(item.resultDate || ""),
+    exclusivity: String(item.exclusivity || "").trim(),
+    noticeUrl: String(item.noticeUrl || item.editalUrl || item.notice || "").trim(),
+    driveUrl: String(item.driveUrl || item.url || "").trim(),
+    createdAt: String(item.createdAt || "").trim()
+  };
+}
+
+function normalizeRouteProjectIds(list = []) {
+  if (!Array.isArray(list)) return [];
+  return uniq(list.map((item) => String(item || "").trim()).filter(Boolean));
 }
 
 function normalizeProjectForMerge(project) {
@@ -5985,7 +6821,7 @@ async function deleteSecureUserFromSupabase(email) {
   if (!client?.auth || typeof client.from !== "function") throw new Error("Supabase Auth indisponível.");
   const normalizedEmail = normalizeUserEmail(email);
   if (!normalizedEmail) return;
-  const { error } = await client.from(SUPABASE_USERS_TABLE).delete().eq("email", normalizedEmail);
+  const { error } = await client.from(SUPABASE_USERS_TABLE).update({ active: false }).eq("email", normalizedEmail);
   if (error) throw error;
 }
 
@@ -6237,6 +7073,8 @@ function mergeState(parsed) {
     durations: pickArray(parsed?.settings?.durations, base.settings.durations),
     distributions: pickArray(parsed?.settings?.distributions, base.settings.distributions),
     statuses: pickArray(parsed?.settings?.statuses, base.settings.statuses),
+    routeStatuses: pickArray(parsed?.settings?.routeStatuses, base.settings.routeStatuses),
+    routeExclusivities: pickArray(parsed?.settings?.routeExclusivities, base.settings.routeExclusivities),
     stages: normalizeSettingsStages(pickArray(parsed?.settings?.stages, base.settings.stages), base.settings.stages)
   };
   mergedSettings.itemColors = mergeItemColors(buildDefaultItemColors(mergedSettings), parsed?.settings?.itemColors || base.settings.itemColors);
@@ -6246,6 +7084,10 @@ function mergeState(parsed) {
     ...project,
     releaseDate: inferReleaseDate(project)
   }));
+  const routes = Array.isArray(parsed?.routes)
+    ? parsed.routes.map(normalizeRouteItemForMerge).filter(Boolean)
+    : base.routes;
+  const routeProjects = normalizeRouteProjectIds(parsed?.routeProjects || base.routeProjects);
   const users = Array.isArray(parsed?.users) && parsed.users.length
     ? parsed.users
         .filter((user) => user && typeof user === "object")
@@ -6275,6 +7117,8 @@ function mergeState(parsed) {
   return {
     settings: mergedSettings,
     projects,
+    routeProjects,
+    routes,
     users,
     auditLogs,
     timeline: {
@@ -6295,6 +7139,11 @@ function seedState() {
     cloned.settings = cloned.settings || {};
     cloned.settings.stages = normalizeSettingsStages(cloned.settings.stages, []);
     cloned.settings.distributions = pickArray(cloned.settings.distributions, ["Lumine", "Prime"]);
+    cloned.settings.routeStatuses = pickArray(
+      cloned.settings.routeStatuses,
+      ["BACKLOG", "AGUARDANDO ABERTURA", "EM ANDAMENTO", "SUBMETIDO", "NÃO SUBMETIDO", "SELECIONADO", "NOMEADO", "PREMIADO", "NÃO SELECIONADO", "CONCLUÍDO"]
+    );
+    cloned.settings.routeExclusivities = pickArray(cloned.settings.routeExclusivities, ["Mundial", "Não", "Parcial [local]", "Preferível"]);
     cloned.users = Array.isArray(cloned.users) && cloned.users.length
       ? cloned.users.map((user) => ({
           id: user.id || uid(),
@@ -6326,6 +7175,8 @@ function seedState() {
       ...project,
       releaseDate: inferReleaseDate(project)
     }));
+    cloned.routes = Array.isArray(cloned.routes) ? cloned.routes.map(normalizeRouteItemForMerge).filter(Boolean) : [];
+    cloned.routeProjects = normalizeRouteProjectIds(cloned.routeProjects);
     cloned.auditLogs = Array.isArray(cloned.auditLogs)
       ? cloned.auditLogs.filter((entry) => entry && typeof entry === "object").slice(-MAX_AUDIT_LOG_ITEMS)
       : [];
@@ -6380,6 +7231,8 @@ function seedState() {
       durations: ["Média-metragem", "Curta-metragem", "Longa-metragem"],
       distributions: ["Lumine", "Prime"],
       statuses: ["Em andamento", "Concluído", "Planejamento", "Pausado"],
+      routeStatuses: ["BACKLOG", "AGUARDANDO ABERTURA", "EM ANDAMENTO", "SUBMETIDO", "NÃO SUBMETIDO", "SELECIONADO", "NOMEADO", "PREMIADO", "NÃO SELECIONADO", "CONCLUÍDO"],
+      routeExclusivities: ["Mundial", "Não", "Parcial [local]", "Preferível"],
       stages,
       itemColors: {
         categories: {
@@ -6406,6 +7259,24 @@ function seedState() {
           Concluído: "#10b981",
           Planejamento: "#f59e0b",
           Pausado: "#94a3b8"
+        },
+        routeStatuses: {
+          BACKLOG: "#9ca3af",
+          "AGUARDANDO ABERTURA": "#f97316",
+          "EM ANDAMENTO": "#fbbf24",
+          SUBMETIDO: "#7c3aed",
+          "NÃO SUBMETIDO": "#ec4899",
+          SELECIONADO: "#4f46e5",
+          NOMEADO: "#3b82f6",
+          PREMIADO: "#10b981",
+          "NÃO SELECIONADO": "#ea580c",
+          CONCLUÍDO: "#16a34a"
+        },
+        routeExclusivities: {
+          Mundial: "#ec4899",
+          "Não": "#3b82f6",
+          "Parcial [local]": "#facc15",
+          Preferível: "#e5e7eb"
         }
       }
     },
@@ -6421,6 +7292,8 @@ function seedState() {
       }
     ],
     projects,
+    routeProjects: [],
+    routes: [],
     auditLogs: [],
     timeline: {
       ...defaultTimelineWindow()

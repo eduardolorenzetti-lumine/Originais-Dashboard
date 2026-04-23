@@ -55,6 +55,7 @@
         <button class="nav-btn active" data-tab="dashboard">Dashboard</button>
         <button class="nav-btn" data-tab="cronograma">Cronograma</button>
         <button class="nav-btn" data-tab="projetos">Projetos</button>
+        <button class="nav-btn" data-tab="rota">Rota</button>
         <button class="nav-btn" data-tab="usuarios">Usuários</button>
         <button class="nav-btn" data-tab="configuracoes">Configurações</button>
       </nav>
@@ -362,11 +363,10 @@
         <header class="view-header">
           <div>
             <h1>Usuários</h1>
-            <p>Convide usuários e defina níveis de acesso</p>
+            <p>Cadastre usuários e defina níveis de acesso</p>
           </div>
           <div class="header-actions">
             <button id="btnCreateUser" class="btn accent">+ Cadastrar Usuário</button>
-            <button id="btnInviteUser" class="btn soft small">Convidar Usuário</button>
           </div>
         </header>
 
@@ -392,6 +392,79 @@
               </tr>
             </thead>
             <tbody id="usersTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="rota" class="tab">
+        <header class="view-header">
+          <div>
+            <h1>Rota</h1>
+            <p>Acompanhe o caminho das produções em festivais e prêmios</p>
+          </div>
+        </header>
+
+        <div class="dashboard-top-controls">
+          <div class="header-actions">
+            <button id="btnFilterRoute" class="btn light filter-toggle-btn">Filtros <span class="filter-arrow" aria-hidden="true"></span></button>
+          </div>
+        </div>
+
+        <section id="routeFiltersPanel" class="dashboard-filters" hidden>
+          <div class="filter-row">
+            <strong>Status:</strong>
+            <div id="routeStatusChips" class="chips"></div>
+          </div>
+          <div class="filter-row">
+            <strong>País:</strong>
+            <div id="routeCountryFilter"></div>
+          </div>
+          <div class="filter-row">
+            <strong>Resultado:</strong>
+            <div id="routeResultYearChips" class="chips"></div>
+          </div>
+          <div class="filter-row">
+            <strong>Exclusividade:</strong>
+            <div id="routeExclusivityChips" class="chips"></div>
+          </div>
+        </section>
+
+        <div class="route-toolbar">
+          <div id="routeSummary" class="route-summary">
+            <button id="btnAddRouteProject" class="btn accent" type="button">+ Adicionar Filme</button>
+          </div>
+          <div class="route-toolbar-actions">
+            <input id="routeSearch" placeholder="Buscar filme, festival ou prêmio..." />
+          </div>
+        </div>
+
+        <div class="table-wrap route-table-wrap">
+          <table>
+            <colgroup>
+              <col class="route-col route-col-1" />
+              <col class="route-col route-col-2" />
+              <col class="route-col route-col-3" />
+              <col class="route-col route-col-4" />
+              <col class="route-col route-col-5" />
+              <col class="route-col route-col-6" />
+              <col class="route-col route-col-7" />
+              <col class="route-col route-col-8" />
+              <col class="route-col route-col-9" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Festival / Prêmio</th>
+                <th>Status</th>
+                <th>País</th>
+                <th>Prazo de inscrição</th>
+                <th>Resultado</th>
+                <th>Exclusividade</th>
+                <th>Edital</th>
+                <th>Drive / URL</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="routeTableBody"></tbody>
           </table>
         </div>
       </section>
@@ -526,6 +599,59 @@
       <menu class="dialog-actions">
         <button type="button" id="inviteCancelBtn" class="btn light">Cancelar</button>
         <button type="submit" class="btn soft">Enviar Convite</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="routeItemDialog">
+    <form id="routeItemForm" method="dialog">
+      <h3 id="routeItemDialogTitle">Novo Festival / Prêmio</h3>
+      <p id="routeItemProjectLabel" class="route-item-project-label"></p>
+      <input type="hidden" id="routeItemId" />
+      <input type="hidden" id="routeProjectId" />
+      <div class="form-grid">
+        <label>Festival / Prêmio
+          <input id="routeItemName" required />
+        </label>
+        <label>Status
+          <select id="routeItemStatus"></select>
+        </label>
+        <label>País
+          <input id="routeItemCountry" />
+        </label>
+        <label>Prazo de inscrição
+          <input id="routeItemDeadline" type="date" lang="pt-BR" />
+        </label>
+        <label>Resultado
+          <input id="routeItemResultDate" type="date" lang="pt-BR" />
+        </label>
+        <label>Exclusividade
+          <select id="routeItemExclusivity"></select>
+        </label>
+        <label>Edital
+          <input id="routeItemNoticeUrl" type="url" placeholder="https://..." />
+        </label>
+        <label>Drive / URL
+          <input id="routeItemDriveUrl" type="url" placeholder="https://..." />
+        </label>
+      </div>
+      <menu class="dialog-actions">
+        <button id="btnDeleteRouteItem" type="button" class="btn danger">Excluir</button>
+        <button id="btnCancelRouteItem" type="button" class="btn light">Cancelar</button>
+        <button class="btn accent" type="submit">Salvar</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="routeProjectDialog">
+    <form id="routeProjectForm" method="dialog">
+      <h3>Adicionar Filme à Rota</h3>
+      <label>Filme
+        <div id="routeProjectPicker"></div>
+      </label>
+      <menu class="dialog-actions">
+        <button id="btnCancelRouteProject" type="button" class="btn light">Cancelar</button>
+        <button class="btn accent" type="submit">Adicionar</button>
       </menu>
     </form>
   </dialog>
