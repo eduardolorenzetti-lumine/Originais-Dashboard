@@ -3,777 +3,130 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta http-equiv="Content-Language" content="pt-BR" />
   <title>Originais Lumine</title>
-  <link rel="stylesheet" href="styles.css" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0a0a0a;
+      color: #e5e5e5;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 3rem;
+    }
+
+    .logo-mark {
+      width: 40px;
+      height: 40px;
+      background: #e63946;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 1.25rem;
+      color: #fff;
+      letter-spacing: -1px;
+      flex-shrink: 0;
+    }
+
+    .brand-text strong {
+      display: block;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      color: #fff;
+    }
+
+    .brand-text small {
+      font-size: 0.7rem;
+      letter-spacing: 0.2em;
+      color: #888;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      font-size: 0.75rem;
+      font-weight: 500;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 1.5rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1rem;
+      width: 100%;
+      max-width: 760px;
+    }
+
+    .card {
+      background: #141414;
+      border: 1px solid #222;
+      border-radius: 10px;
+      padding: 1.25rem 1.5rem;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.15s, background 0.15s;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .card:hover {
+      border-color: #444;
+      background: #1a1a1a;
+    }
+
+    .card-title {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .card-desc {
+      font-size: 0.75rem;
+      color: #666;
+      line-height: 1.5;
+    }
+
+    .card-arrow {
+      margin-top: 0.5rem;
+      font-size: 0.75rem;
+      color: #444;
+    }
+  </style>
 </head>
 <body>
-  <section id="loginView" class="login-view" hidden>
-    <div class="login-card">
-      <a href="#" class="login-brand brand-link" data-go-home>
-        <div class="logo-mark" aria-hidden="true">
-          <span class="logo-l">L</span>
-          <span class="logo-point"></span>
-        </div>
-        <div>
-          <strong>ORIGINAIS</strong>
-          <small>LUMINE</small>
-        </div>
-      </a>
-      <form id="loginForm" class="login-form" autocomplete="on">
-        <label>E-mail
-          <input id="loginEmail" type="email" required autocomplete="email" />
-        </label>
-        <label>Senha
-          <input id="loginPassword" type="password" required autocomplete="current-password" />
-        </label>
-        <p id="loginStatus" class="login-status" hidden></p>
-        <p id="loginError" class="login-error" hidden></p>
-        <button type="submit" class="btn accent">Entrar</button>
-        <div class="login-help-actions">
-          <button id="forgotPasswordBtn" type="button" class="login-help-btn">Esqueci minha senha!</button>
-          <button id="firstAccessBtn" type="button" class="login-help-btn">Primeiro acesso</button>
-        </div>
-      </form>
+  <div class="brand">
+    <div class="logo-mark">L</div>
+    <div class="brand-text">
+      <strong>ORIGINAIS</strong>
+      <small>Lumine</small>
     </div>
-  </section>
-
-  <div id="appShell" class="app-shell" hidden>
-    <aside class="sidebar">
-      <a href="#" class="brand brand-link" data-go-home>
-        <div class="logo-mark" aria-hidden="true">
-          <span class="logo-l">L</span>
-          <span class="logo-point"></span>
-        </div>
-        <div>
-          <strong>ORIGINAIS</strong>
-          <small>LUMINE</small>
-        </div>
-      </a>
-
-      <nav class="side-nav">
-        <button class="nav-btn active" data-tab="dashboard">Dashboard</button>
-        <button class="nav-btn" data-tab="cronograma">Cronograma</button>
-        <button class="nav-btn" data-tab="projetos">Projetos</button>
-        <button class="nav-btn" data-tab="rota">Rota</button>
-        <button class="nav-btn" data-tab="usuarios">Usuários</button>
-        <button class="nav-btn" data-tab="configuracoes">Configurações</button>
-      </nav>
-    </aside>
-
-    <main class="content">
-      <div class="content-top-actions">
-        <div id="profileMenu" class="profile-menu">
-          <button id="profileMenuBtn" class="btn light profile-menu-btn" type="button" aria-label="Perfil">
-            <svg class="profile-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-4.42 0-8 2.24-8 5v1h16v-1c0-2.76-3.58-5-8-5z"/></svg>
-            <svg class="profile-caret" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5z"/></svg>
-          </button>
-          <div id="profileMenuList" class="profile-menu-list" hidden>
-            <div id="profileMenuUser" class="profile-menu-user"></div>
-            <button type="button" id="profileViewEditBtn">Ver e Editar Perfil</button>
-            <div class="profile-menu-section">
-              <span class="profile-menu-section-title">Tema</span>
-              <div class="profile-theme-options">
-                <button type="button" data-theme-option="light">Claro</button>
-                <button type="button" data-theme-option="dark">Escuro</button>
-                <button type="button" data-theme-option="system">Sistema</button>
-              </div>
-            </div>
-            <button type="button" id="profileLogoutBtn">Sair</button>
-          </div>
-        </div>
-      </div>
-
-      <section id="dashboard" class="tab active">
-        <header class="view-header">
-          <div>
-            <h1>Dashboard</h1>
-            <p>Visão geral das suas produções</p>
-          </div>
-        </header>
-
-        <div class="dashboard-top-controls">
-          <div class="year-inline">
-            <strong>ANO:</strong>
-            <div id="yearChips" class="chips"></div>
-          </div>
-          <button id="dashboardFiltersToggle" class="btn light filter-toggle-btn">Filtros <span class="filter-arrow" aria-hidden="true"></span></button>
-        </div>
-
-        <section id="dashboardFiltersPanel" class="dashboard-filters" hidden>
-          <div class="filter-row">
-            <strong>Status:</strong>
-            <div id="dashboardStatusChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Categoria:</strong>
-            <div id="dashboardCategoryChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Formato:</strong>
-            <div id="dashboardFormatChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Natureza:</strong>
-            <div id="dashboardNatureChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Duração:</strong>
-            <div id="dashboardDurationChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Registros:</strong>
-            <div id="dashboardFlagChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Infantil:</strong>
-            <div id="dashboardInfantilChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Distribuição:</strong>
-            <div id="dashboardDistributionChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Projeto:</strong>
-            <div id="dashboardProjectFilter"></div>
-          </div>
-        </section>
-
-        <div id="summaryCards" class="summary-cards"></div>
-
-        <div class="dashboard-grid">
-          <article class="panel wide">
-            <h3>Produções por Ano</h3>
-            <div id="chartByYear" class="chart-bars"></div>
-          </article>
-
-          <article class="panel wide">
-            <h3>Tempo Médio por Etapa (meses)</h3>
-            <div id="chartAvgStage" class="chart-bars horizontal"></div>
-          </article>
-
-          <article class="panel">
-            <h3>Por Status</h3>
-            <div id="chartByStatus" class="chart-bars"></div>
-          </article>
-
-          <article class="panel">
-            <h3>Por Categoria</h3>
-            <div id="chartByCategory" class="chart-bars"></div>
-          </article>
-
-          <article class="panel">
-            <h3>Por Formato</h3>
-            <div id="chartByFormat" class="chart-bars"></div>
-          </article>
-
-          <article class="panel">
-            <h3>Por Natureza</h3>
-            <div id="chartByNature" class="chart-bars"></div>
-          </article>
-
-          <article class="panel">
-            <h3>Por Duração</h3>
-            <div id="chartByDuration" class="chart-bars"></div>
-          </article>
-
-        </div>
-      </section>
-
-      <section id="cronograma" class="tab">
-        <header class="view-header">
-          <div>
-            <h1>Cronograma</h1>
-            <p>Visão de Gantt das produções</p>
-          </div>
-        </header>
-
-        <div class="dashboard-top-controls">
-          <div class="year-inline">
-            <strong>ANO:</strong>
-            <div id="timelineYears" class="chips"></div>
-          </div>
-          <div class="header-actions">
-            <button id="btnFilterGantt" class="btn light filter-toggle-btn">Filtros <span class="filter-arrow" aria-hidden="true"></span></button>
-          </div>
-        </div>
-
-        <section id="ganttFiltersPanel" class="dashboard-filters" hidden>
-          <div class="filter-row">
-            <strong>Status:</strong>
-            <div id="ganttStatusChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Categoria:</strong>
-            <div id="ganttCategoryChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Formato:</strong>
-            <div id="ganttFormatChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Natureza:</strong>
-            <div id="ganttNatureChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Duração:</strong>
-            <div id="ganttDurationChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Registros:</strong>
-            <div id="ganttFlagChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Infantil:</strong>
-            <div id="ganttInfantilChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Distribuição:</strong>
-            <div id="ganttDistributionChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Projeto:</strong>
-            <div id="ganttProjectFilter"></div>
-          </div>
-        </section>
-
-        <div class="timeline-toolbar">
-          <div class="timeline-zoom-left">
-            <button id="timelineBack" class="btn light timeline-btn-square" title="Diminuir tamanho dos meses">-</button>
-            <button id="timelineForward" class="btn light timeline-btn-square" title="Aumentar tamanho dos meses">+</button>
-            <button id="timelineToday" class="btn light" type="button">Hoje</button>
-          </div>
-          <div class="timeline-center-nav">
-            <button id="timelineLeft" class="btn light timeline-btn-square" title="Mover timeline para esquerda">‹</button>
-            <div class="timeline-range-label" id="timelineRangeLabel"></div>
-            <button id="timelineRight" class="btn light timeline-btn-square" title="Mover timeline para direita">›</button>
-          </div>
-          <div class="timeline-controls-right">
-            <button id="btnQuickNewProject" class="btn accent">+ Novo Projeto</button>
-          </div>
-        </div>
-
-        <div class="timeline-hidden-inputs" hidden>
-          <input type="month" id="timelineStart" lang="pt-BR" />
-          <input type="month" id="timelineEnd" lang="pt-BR" />
-          <button id="applyTimeline" class="btn light">Aplicar</button>
-        </div>
-
-        <div id="ganttContainer" class="gantt-container"></div>
-      </section>
-
-      <section id="projetos" class="tab">
-        <div class="projects-top-sticky">
-          <header class="view-header">
-            <div>
-              <h1>Projetos</h1>
-              <p>Gerencie suas produções audiovisuais</p>
-            </div>
-          </header>
-
-          <div class="dashboard-top-controls">
-            <div class="year-inline">
-              <strong>ANO:</strong>
-              <div id="projectYears" class="chips"></div>
-            </div>
-            <div class="header-actions">
-              <button id="btnFilterProjects" class="btn light filter-toggle-btn">Filtros <span class="filter-arrow" aria-hidden="true"></span></button>
-            </div>
-          </div>
-
-          <section id="projectFiltersPanel" class="dashboard-filters" hidden>
-            <div class="filter-row">
-              <strong>Status:</strong>
-              <div id="projectStatusChips" class="chips"></div>
-            </div>
-            <div class="filter-row">
-              <strong>Categoria:</strong>
-              <div id="projectCategoryChips" class="chips"></div>
-            </div>
-            <div class="filter-row">
-              <strong>Formato:</strong>
-              <div id="projectFormatChips" class="chips"></div>
-            </div>
-            <div class="filter-row">
-              <strong>Natureza:</strong>
-              <div id="projectNatureChips" class="chips"></div>
-            </div>
-            <div class="filter-row">
-              <strong>Duração:</strong>
-              <div id="projectDurationChips" class="chips"></div>
-            </div>
-            <div class="filter-row">
-              <strong>Registros:</strong>
-              <div id="projectFlagChips" class="chips"></div>
-            </div>
-            <div class="filter-row">
-              <strong>Infantil:</strong>
-              <div id="projectInfantilChips" class="chips"></div>
-            </div>
-            <div class="filter-row">
-              <strong>Distribuição:</strong>
-              <div id="projectDistributionChips" class="chips"></div>
-            </div>
-            <div class="filter-row">
-              <strong>Projeto:</strong>
-              <div id="projectProjectFilter"></div>
-            </div>
-          </section>
-
-          <div class="table-tools">
-            <input id="projectSearch" placeholder="Buscar por nome ou SKU..." />
-            <div class="project-tools-actions">
-              <button id="btnImportCsv" class="btn light project-import-btn" type="button">
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l4 4h-3v7h-2V7H8l4-4zm-7 12h2v4h10v-4h2v6H5v-6z"/></svg>
-                <span>Importar CSV</span>
-              </button>
-              <input id="csvInput" type="file" accept=".csv" multiple hidden />
-              <button id="btnNewProject" class="btn accent project-new-btn" type="button">
-                <span class="plus">+</span>
-                <span>Novo Projeto</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="table-wrap projects-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>SKU</th>
-                <th>Título</th>
-                <th>Categoria</th>
-                <th>Formato</th>
-                <th>Natureza</th>
-                <th>Duração</th>
-                <th>Conteúdo Infantil</th>
-                <th>CPB</th>
-                <th>CRT</th>
-                <th>IMDb</th>
-                <th>Status</th>
-                <th>Ações</th>
-              </tr>
-            </thead>
-            <tbody id="projectsTableBody"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="usuarios" class="tab">
-        <header class="view-header">
-          <div>
-            <h1>Usuários</h1>
-            <p>Cadastre usuários e defina níveis de acesso</p>
-          </div>
-          <div class="header-actions">
-            <button id="btnCreateUser" class="btn accent">+ Cadastrar Usuário</button>
-          </div>
-        </header>
-
-        <article class="panel user-roles-panel">
-          <h3>Níveis de Gestão</h3>
-          <div class="user-role-grid">
-            <div><strong>ADMIN</strong><small>Gestão completa</small></div>
-            <div><strong>EDITOR</strong><small>Edição de conteúdo, sem gestão de usuários</small></div>
-            <div><strong>LEITOR</strong><small>Somente visualização</small></div>
-          </div>
-        </article>
-
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Nome</th>
-                <th>E-mail</th>
-                <th>Função</th>
-                <th>Acesso</th>
-                <th>Convite</th>
-                <th>Ações</th>
-              </tr>
-            </thead>
-            <tbody id="usersTableBody"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="rota" class="tab">
-        <header class="view-header">
-          <div>
-            <h1>Rota</h1>
-            <p>Acompanhe o caminho das produções em festivais e prêmios</p>
-          </div>
-        </header>
-
-        <div class="dashboard-top-controls">
-          <div class="header-actions">
-            <button id="btnFilterRoute" class="btn light filter-toggle-btn">Filtros <span class="filter-arrow" aria-hidden="true"></span></button>
-          </div>
-        </div>
-
-        <section id="routeFiltersPanel" class="dashboard-filters" hidden>
-          <div class="filter-row">
-            <strong>Status:</strong>
-            <div id="routeStatusChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>País:</strong>
-            <div id="routeCountryFilter"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Resultado:</strong>
-            <div id="routeResultYearChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Exclusividade:</strong>
-            <div id="routeExclusivityChips" class="chips"></div>
-          </div>
-        </section>
-
-        <div class="route-toolbar">
-          <div id="routeSummary" class="route-summary">
-            <button id="btnAddRouteProject" class="btn accent" type="button">+ Adicionar Filme</button>
-          </div>
-          <div class="route-toolbar-actions">
-            <input id="routeSearch" placeholder="Buscar filme, festival ou prêmio..." />
-          </div>
-        </div>
-
-        <div class="table-wrap route-table-wrap">
-          <table>
-            <colgroup>
-              <col class="route-col route-col-1" />
-              <col class="route-col route-col-2" />
-              <col class="route-col route-col-3" />
-              <col class="route-col route-col-4" />
-              <col class="route-col route-col-5" />
-              <col class="route-col route-col-6" />
-              <col class="route-col route-col-7" />
-              <col class="route-col route-col-8" />
-              <col class="route-col route-col-9" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>Festival / Prêmio</th>
-                <th>Status</th>
-                <th>País</th>
-                <th>Prazo de inscrição</th>
-                <th>Resultado</th>
-                <th>Exclusividade</th>
-                <th>Edital</th>
-                <th>Drive / URL</th>
-                <th>Ações</th>
-              </tr>
-            </thead>
-            <tbody id="routeTableBody"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section id="configuracoes" class="tab">
-        <header class="view-header">
-          <div>
-            <h1>Configurações</h1>
-            <p>Gerencie categorias, formatos, status e etapas</p>
-          </div>
-        </header>
-
-        <div id="configTabs" class="chips tabs-like"></div>
-        <article class="panel">
-          <div class="panel-head">
-            <h3 id="configTitle"></h3>
-            <button id="btnAddConfig" class="btn accent">+ Adicionar</button>
-          </div>
-          <ul id="configList" class="config-list"></ul>
-        </article>
-      </section>
-    </main>
   </div>
 
-  <dialog id="projectDialog">
-    <form id="projectForm" method="dialog">
-      <h2 id="dialogTitle">Novo Projeto</h2>
-      <input type="hidden" id="projectId" />
+  <h1>Ferramentas internas</h1>
 
-      <div class="form-grid">
-        <label>SKU <input id="projectCode" required /></label>
-        <label>Título <input id="projectTitle" required /></label>
-        <label>Ano <input id="projectYear" type="number" min="1900" max="2100" /></label>
-        <label>Categoria <select id="projectCategory"></select></label>
-        <label>Formato <select id="projectFormat"></select></label>
-        <label>Natureza <select id="projectNature"></select></label>
-        <label>Duração <select id="projectDuration"></select></label>
-        <label>Conteúdo Infantil
-          <select id="projectInfantilContent">
-            <option value="">Selecione</option>
-            <option value="Sim">Sim</option>
-            <option value="Não">Não</option>
-          </select>
-        </label>
-        <label>Status <select id="projectStatus"></select></label>
-        <label>Gasto (R$) <input id="projectBudget" type="text" inputmode="decimal" placeholder="R$ 0,00" /></label>
-        <label>Lançamento
-          <div class="release-field-wrap">
-            <input id="projectReleaseDateText" class="release-field-text" type="text" inputmode="numeric" placeholder="dd/mm/aaaa" />
-            <button id="projectReleaseDateOpen" type="button" class="btn light release-field-btn" title="Selecionar data" aria-label="Selecionar data">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 2h2v2h6V2h2v2h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h3V2zm13 8H4v8h16v-8zM4 8h16V6H4v2z"/></svg>
-            </button>
-            <input id="projectReleaseDatePicker" class="release-field-picker" type="date" lang="pt-BR" />
-          </div>
-        </label>
-        <div class="project-flags-grid">
-          <label class="checkbox-inline"><input id="projectFlagCpb" type="checkbox" /> CPB</label>
-          <label class="checkbox-inline"><input id="projectFlagCrt" type="checkbox" /> CRT</label>
-          <label class="checkbox-inline"><input id="projectFlagImdb" type="checkbox" /> IMDb</label>
-        </div>
-        <label class="project-distribution-field">Distribuição
-          <div id="projectDistributionOptions" class="project-distribution-options"></div>
-        </label>
-      </div>
-
-      <label>Observações
-        <textarea id="projectNotes" rows="3" placeholder="Informações da produção..."></textarea>
-      </label>
-
-      <div class="panel">
-        <div class="panel-head">
-          <h3>Etapas</h3>
-          <button id="btnAddStage" type="button" class="btn accent">+ Etapa</button>
-        </div>
-        <div id="projectStages"></div>
-      </div>
-
-      <menu class="dialog-actions">
-        <button id="btnDeleteProject" type="button" class="btn danger">Excluir</button>
-        <button id="btnCancelDialog" type="button" class="btn light">Cancelar</button>
-        <button class="btn accent" type="submit">Salvar</button>
-      </menu>
-    </form>
-  </dialog>
-
-  <dialog id="userDialog">
-    <form id="userForm" method="dialog">
-      <h3 id="userDialogTitle">Cadastrar Usuário</h3>
-      <input type="hidden" id="userId" />
-      <div class="form-grid user-form-grid">
-        <label>Nome
-          <input id="userName" required />
-        </label>
-        <label>E-mail
-          <input id="userEmail" type="email" required />
-        </label>
-        <label>Função
-          <select id="userRole">
-            <option>ADMIN</option>
-            <option>EDITOR</option>
-            <option>LEITOR</option>
-          </select>
-        </label>
-        <label>Acesso
-          <input id="userPassword" type="password" autocomplete="new-password" minlength="6" placeholder="Mínimo 6 caracteres" />
-        </label>
-        <label>Confirmar acesso
-          <input id="userPasswordConfirm" type="password" autocomplete="new-password" minlength="6" />
-        </label>
-      </div>
-      <p id="userPasswordHint" class="dialog-hint" hidden>Deixe os campos de senha em branco para manter a senha atual.</p>
-      <menu class="dialog-actions">
-        <button type="button" id="userCancelBtn" class="btn light">Cancelar</button>
-        <button type="submit" class="btn accent">Salvar Usuário</button>
-      </menu>
-    </form>
-  </dialog>
-
-  <dialog id="inviteDialog">
-    <form id="inviteForm" method="dialog">
-      <h3>Convidar Usuário</h3>
-      <label>E-mail
-        <input id="inviteEmail" type="email" required placeholder="email@dominio.com" />
-      </label>
-      <label>Função
-        <select id="inviteRole">
-          <option value="LEITOR">LEITOR</option>
-          <option value="EDITOR">EDITOR</option>
-          <option value="ADMIN">ADMIN</option>
-        </select>
-      </label>
-      <menu class="dialog-actions">
-        <button type="button" id="inviteCancelBtn" class="btn light">Cancelar</button>
-        <button type="submit" class="btn soft">Enviar Convite</button>
-      </menu>
-    </form>
-  </dialog>
-
-  <dialog id="routeItemDialog">
-    <form id="routeItemForm" method="dialog">
-      <h3 id="routeItemDialogTitle">Novo Festival / Prêmio</h3>
-      <p id="routeItemProjectLabel" class="route-item-project-label"></p>
-      <input type="hidden" id="routeItemId" />
-      <input type="hidden" id="routeProjectId" />
-      <div class="form-grid">
-        <label>Festival / Prêmio
-          <input id="routeItemName" required />
-        </label>
-        <label>Status
-          <select id="routeItemStatus"></select>
-        </label>
-        <label>País
-          <input id="routeItemCountry" />
-        </label>
-        <label>Prazo de inscrição
-          <input id="routeItemDeadline" type="date" lang="pt-BR" />
-        </label>
-        <label>Resultado
-          <input id="routeItemResultDate" type="date" lang="pt-BR" />
-        </label>
-        <label>Exclusividade
-          <select id="routeItemExclusivity"></select>
-        </label>
-        <label>Edital
-          <input id="routeItemNoticeUrl" type="url" placeholder="https://..." />
-        </label>
-        <label>Drive / URL
-          <input id="routeItemDriveUrl" type="url" placeholder="https://..." />
-        </label>
-      </div>
-      <menu class="dialog-actions">
-        <button id="btnDeleteRouteItem" type="button" class="btn danger">Excluir</button>
-        <button id="btnCancelRouteItem" type="button" class="btn light">Cancelar</button>
-        <button class="btn accent" type="submit">Salvar</button>
-      </menu>
-    </form>
-  </dialog>
-
-  <dialog id="routeProjectDialog">
-    <form id="routeProjectForm" method="dialog">
-      <h3>Adicionar Filme à Rota</h3>
-      <label>Filme
-        <div id="routeProjectPicker"></div>
-      </label>
-      <menu class="dialog-actions">
-        <button id="btnCancelRouteProject" type="button" class="btn light">Cancelar</button>
-        <button class="btn accent" type="submit">Adicionar</button>
-      </menu>
-    </form>
-  </dialog>
-
-  <dialog id="configItemDialog">
-    <form id="configItemForm" method="dialog">
-      <h3 id="configItemDialogTitle">Editar Item</h3>
-      <input type="hidden" id="configItemKey" />
-      <input type="hidden" id="configItemId" />
-      <label>Nome
-        <input id="configItemName" required />
-      </label>
-      <label id="configItemColorWrap">Cor
-        <input id="configItemColor" class="config-color-input" type="color" />
-      </label>
-      <label id="configItemSingleDayWrap" class="config-item-checkbox-wrap" hidden>
-        <span>Apenas 1 dia</span>
-        <input id="configItemSingleDay" type="checkbox" />
-      </label>
-      <menu class="dialog-actions">
-        <button id="configItemCancelBtn" type="button" class="btn light">Cancelar</button>
-        <button type="submit" class="btn accent">Salvar</button>
-      </menu>
-    </form>
-  </dialog>
-
-  <template id="stageRowTpl">
-    <div class="stage-row">
-      <label>Etapa
-        <select data-field="stageId"></select>
-      </label>
-      <label>Mês de início
-        <select data-field="startMonth"></select>
-      </label>
-      <label>Ano de início
-        <select data-field="startYear"></select>
-      </label>
-      <label>Quinzena
-        <select data-field="startHalf">
-          <option value="1">1ª</option>
-          <option value="2">2ª</option>
-        </select>
-      </label>
-      <label>Duração (meses)
-        <input data-field="duration" type="number" min="0.5" max="240" step="0.5" inputmode="decimal" />
-      </label>
-      <label>Término
-        <input data-field="endPreview" type="text" readonly />
-      </label>
-      <button
-        data-remove
-        type="button"
-        class="btn danger icon-btn stage-remove-btn"
-        title="Excluir etapa"
-        aria-label="Excluir etapa"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 2h5v2H3V5h5l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a2 2 0 0 0 2-2V8H4v11a2 2 0 0 0 2 2z"/></svg>
-      </button>
-      <input data-field="start" type="hidden" />
-      <input data-field="end" type="hidden" />
-      <small class="month-pt-label" data-month-label="period"></small>
-    </div>
-  </template>
-
-  <template id="stageMonthOptionsTpl">
-    <option value="01">Jan</option>
-    <option value="02">Fev</option>
-    <option value="03">Mar</option>
-    <option value="04">Abr</option>
-    <option value="05">Mai</option>
-    <option value="06">Jun</option>
-    <option value="07">Jul</option>
-    <option value="08">Ago</option>
-    <option value="09">Set</option>
-    <option value="10">Out</option>
-    <option value="11">Nov</option>
-    <option value="12">Dez</option>
-  </template>
-
-  <dialog id="stageDialog">
-    <form id="stageForm" method="dialog">
-      <h3 id="stageDialogTitle">Nova Etapa</h3>
-      <input type="hidden" id="stageProjectId" />
-      <input type="hidden" id="stageId" />
-      <input type="hidden" id="stageStart" />
-      <input type="hidden" id="stageEnd" />
-      <div class="form-grid stage-dialog-grid">
-        <label class="span-2">Etapa *
-          <select id="stageTypeSelect"></select>
-        </label>
-        <label class="span-2">Mês de início *
-          <div class="stage-start-grid">
-            <select id="stageStartMonth" required></select>
-            <select id="stageStartYear" required></select>
-            <select id="stageStartHalf" required>
-              <option value="1">1ª quinzena</option>
-              <option value="2">2ª quinzena</option>
-            </select>
-          </div>
-        </label>
-        <label>Duração (meses) *
-          <input id="stageDuration" type="number" min="0.5" max="240" step="0.5" inputmode="decimal" required />
-        </label>
-        <label>Término
-          <input type="text" id="stageEndPreview" readonly />
-        </label>
-        <small class="month-pt-label" id="stagePeriodLabel"></small>
-      </div>
-      <label>Observações
-        <textarea id="stageNotes" rows="3"></textarea>
-      </label>
-      <menu class="dialog-actions">
-        <button type="button" id="stageDeleteBtn" class="btn danger">Excluir</button>
-        <button type="button" id="stageCancelBtn" class="btn light">Cancelar</button>
-        <button type="submit" class="btn accent">Salvar Etapa</button>
-      </menu>
-    </form>
-  </dialog>
-
-  <script src="config.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="seed-data.js"></script>
-  <script src="script.js"></script>
+  <div class="grid">
+    <a href="/dashboard" class="card">
+      <span class="card-title">Dashboard</span>
+      <span class="card-desc">Cronograma e gestão de projetos originais</span>
+      <span class="card-arrow">→</span>
+    </a>
+  </div>
 </body>
 </html>
