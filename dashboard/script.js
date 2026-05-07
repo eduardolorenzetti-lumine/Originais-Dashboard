@@ -75,7 +75,7 @@ const THEME_STORAGE_KEY = "lumine-theme";
 const THEME_VALUES = new Set(["dark", "light", "system"]);
 const MAX_AUDIT_LOG_ITEMS = 2000;
 
-let state = seedState();
+let state = null;
 let currentTab = "dashboard";
 let selectedDashboardYears = new Set();
 let dashboardFiltersOpen = false;
@@ -86,7 +86,6 @@ let selectedDashboardFilters = {
   natures: new Set(),
   durations: new Set(),
   flags: new Set(),
-  infantis: new Set(),
   distributions: new Set(),
   projects: new Set()
 };
@@ -99,7 +98,6 @@ let selectedGanttFilters = {
   natures: new Set(),
   durations: new Set(),
   flags: new Set(),
-  infantis: new Set(),
   distributions: new Set(),
   projects: new Set()
 };
@@ -112,7 +110,6 @@ let selectedProjectFilters = {
   natures: new Set(),
   durations: new Set(),
   flags: new Set(),
-  infantis: new Set(),
   distributions: new Set(),
   projects: new Set()
 };
@@ -169,11 +166,13 @@ const FIELD_TO_SETTINGS_KEY = {
   distribution: "distributions",
   status: "statuses"
 };
+const FIXED_NATURE_LABEL = "Short doc";
 const PROJECT_FLAG_FIELDS = [
   { key: "cpb", label: "CPB" },
   { key: "crt", label: "CRT" },
   { key: "imdb", label: "IMDb" }
 ];
+const PROJECT_RECORD_FILTER_FIELDS = [{ key: "infantil", label: "Infantil" }, ...PROJECT_FLAG_FIELDS];
 
 function getSupabaseProjectRef() {
   const { url } = getSupabaseConfig();
@@ -519,6 +518,29 @@ function bindGlobalActions() {
   });
 
   document.getElementById("csvInput").addEventListener("change", importCsvFile);
+
+  const refreshFromSupabaseOnReturn = async () => {
+    if (!isRemoteSupabaseAuthEnabled() || !supabaseAuthSession?.access_token) return;
+    const stateChanged = await refreshStateFromSupabaseNow();
+    let usersChanged = false;
+    try {
+      await refreshSecureUsersFromSupabase({ persist: true });
+      usersChanged = true;
+    } catch (error) {
+      console.warn("[Originais] Falha ao atualizar usuários ao retomar a aba.", error?.message || error);
+    }
+    if (stateChanged || usersChanged) {
+      applyAuthVisibility();
+      renderAll();
+    }
+  };
+
+  window.addEventListener("focus", () => {
+    void refreshFromSupabaseOnReturn();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") void refreshFromSupabaseOnReturn();
+  });
 
   document.getElementById("btnAddConfig").addEventListener("click", () => {
     if (!canEditContent()) {
@@ -1042,8 +1064,10 @@ async function syncCurrentUserFromSupabaseSession({ persistUsers = true } = {}) 
     refreshedUsers = true;
   } catch (error) {
     console.warn("[Originais] Falha ao carregar usuários seguros.", error?.message || error);
-    state.users = cachedUsers;
-    secureUsersLoaded = cachedUsers.length > 0;
+    state.users = currentSecureUser
+      ? [...cachedUsers.filter((user) => normalizeUserEmail(user?.email) !== email), currentSecureUser]
+      : cachedUsers;
+    secureUsersLoaded = state.users.length > 0;
   }
   currentUserId = email;
   const current = getCurrentUser();
@@ -1144,8 +1168,10 @@ function authenticateUser(email, password) {
       user.passwordHash = hashPassword(DEFAULT_ADMIN_PASSWORD);
       saveState();
       return user;
+    }
+    return null;
   }
-  return null;
+  return passwordHash === hashPassword(password) ? user : null;
 }
 
 function clearSupabaseStoredSession() {
@@ -1163,8 +1189,6 @@ function clearSupabaseStoredSession() {
     }
     keysToRemove.forEach((key) => storage.removeItem(key));
   } catch (_) {}
-}
-  return passwordHash === hashPassword(password) ? user : null;
 }
 
 function getCurrentUser() {
@@ -1691,7 +1715,7 @@ function bindDialog() {
           const { error } = await getSupabaseClient().auth.updateUser({ password: payload.password });
           if (error) throw error;
         }
-        setUserFirstAccessPending(payload.email, Boolean(payload.firstAccessPending));
+        setUserFirstAccessPending(payload.email, Boolean(payload.firstAccessPending), payload.role);
         await refreshSecureUsersFromSupabase({ persist: true });
       } catch (error) {
         alert("Não foi possível salvar o usuário no Supabase.");
@@ -1860,11 +1884,10 @@ function renderDashboard() {
   const projects = filteredDashboardProjects();
 
   const totalProjects = allProjects.length;
-  const projectsWithSpent = projects
-    .map((p) => ({ p, value: getProjectSpentValue(p) }))
-    .filter((item) => item.value !== null);
-  const totalSpent = projectsWithSpent.reduce((acc, item) => acc + item.value, 0);
-  const avgSpent = projectsWithSpent.length ? totalSpent / projectsWithSpent.length : 0;
+  const { regularSpent, shortDocSpent } = getDashboardSpentCollections(projects);
+  const totalSpent = regularSpent.reduce((acc, item) => acc + item.value, 0);
+  const avgSpent = regularSpent.length ? totalSpent / regularSpent.length : 0;
+  const shortDocSpentTotal = shortDocSpent.reduce((acc, item) => acc + item.value, 0);
 
   document.getElementById("summaryCards").innerHTML = [
     cardHtml("Total de Produções", String(totalProjects), "projects"),
@@ -1883,6 +1906,7 @@ function renderDashboard() {
   renderBarChart(document.getElementById("chartByFormat"), countBy(projects, formatPicker, true), "vertical", ["#10b981", "#3b82f6", "#f59e0b"]);
   renderBarChart(document.getElementById("chartByNature"), countBy(projects, naturePicker, true), "vertical", ["#10b981", "#3b82f6", "#f59e0b"]);
   renderBarChart(document.getElementById("chartByDuration"), countBy(projects, durationPicker, true), "vertical", ["#10b981", "#3b82f6", "#f59e0b"]);
+  renderBarChart(document.getElementById("chartShortDocsSpent"), { "Short doc": shortDocSpentTotal }, "vertical", ["#64748b"], (value) => money(value));
   renderBarChart(document.getElementById("chartAvgStage"), avgMonthsByStage(projects), "horizontal", ["#94a3b8", "#60a5fa", "#fcd34d", "#34d399", "#f472b6"]);
 }
 
@@ -1925,7 +1949,6 @@ function filteredDashboardProjects() {
     if (!matchesMultiFilter(getNormalizedProjectField(p, "format", { strict: true }), selectedDashboardFilters.formats)) return false;
     if (!matchesMultiFilter(getNormalizedProjectField(p, "nature", { strict: true }), selectedDashboardFilters.natures)) return false;
     if (!matchesMultiFilter(getNormalizedProjectField(p, "duration", { strict: true }), selectedDashboardFilters.durations)) return false;
-    if (!matchesMultiFilter(getProjectInfantilValue(p), selectedDashboardFilters.infantis)) return false;
     if (!matchesProjectFlagFilters(p, selectedDashboardFilters.flags)) return false;
     if (!matchesMultiFilter(getProjectDistributions(p), selectedDashboardFilters.distributions)) return false;
     if (!matchesProjectFilter(p.id, selectedDashboardFilters.projects)) return false;
@@ -1944,15 +1967,13 @@ function renderDashboardExtraFilters() {
   const natureValues = uniq(state.settings.natures).filter(Boolean);
   const durationValues = uniq(state.settings.durations).filter(Boolean);
   const distributionValues = uniq([...(state.settings.distributions || []), ...state.projects.flatMap((p) => getProjectDistributions(p))]).filter(Boolean);
-  const infantilValues = ["Sim", "Não"];
   sanitizeFilterSet(selectedDashboardFilters.statuses, statusValues);
   sanitizeFilterSet(selectedDashboardFilters.categories, categoryValues);
   sanitizeFilterSet(selectedDashboardFilters.formats, formatValues);
   sanitizeFilterSet(selectedDashboardFilters.natures, natureValues);
   sanitizeFilterSet(selectedDashboardFilters.durations, durationValues);
-  sanitizeFilterSet(selectedDashboardFilters.infantis, infantilValues);
   sanitizeFilterSet(selectedDashboardFilters.distributions, distributionValues);
-  sanitizeFilterSet(selectedDashboardFilters.flags, PROJECT_FLAG_FIELDS.map((field) => field.key));
+  sanitizeFilterSet(selectedDashboardFilters.flags, PROJECT_RECORD_FILTER_FIELDS.map((field) => field.key));
 
   renderDashboardFilterChips(
     document.getElementById("dashboardStatusChips"),
@@ -1983,12 +2004,6 @@ function renderDashboardExtraFilters() {
     durationValues,
     selectedDashboardFilters.durations,
     "durations"
-  );
-  renderDashboardFilterChips(
-    document.getElementById("dashboardInfantilChips"),
-    infantilValues,
-    selectedDashboardFilters.infantis,
-    "infantis"
   );
   renderProjectFlagFilterChips(
     document.getElementById("dashboardFlagChips"),
@@ -2032,7 +2047,7 @@ function renderProjectFlagFilterChips(container, selectedSet, onChange = renderD
   const allActive = selectedSet.size === 0;
   container.innerHTML = [
     `<button class="chip ${allActive ? "active" : ""}" data-flag-filter="__all">Todos</button>`,
-    ...PROJECT_FLAG_FIELDS.map(
+    ...PROJECT_RECORD_FILTER_FIELDS.map(
       (field) => `<button class="chip ${selectedSet.has(field.key) ? "active" : ""}" data-flag-filter="${field.key}">${escapeHtml(field.label)}</button>`
     )
   ].join("");
@@ -2306,11 +2321,49 @@ function getProjectDistributions(project) {
 }
 
 function getProjectInfantilValue(project) {
+  if (project?.infantil === true) return "Sim";
   const raw = String(project?.infantilContent || project?.contentInfantil || "").trim().toLowerCase();
   if (raw === "sim") return "Sim";
-  if (raw === "nao" || raw === "não") return "Não";
-  if (project?.infantil === true) return "Sim";
   return "";
+}
+
+function isShortDocProject(project) {
+  return normalizeSearchText(getProjectField(project, "nature")) === normalizeSearchText(FIXED_NATURE_LABEL);
+}
+
+function getDashboardSpentCollections(projects = []) {
+  const regularSpent = [];
+  const shortDocSpent = [];
+  (Array.isArray(projects) ? projects : []).forEach((project) => {
+    const value = getProjectSpentValue(project);
+    if (value === null) return;
+    if (isShortDocProject(project)) shortDocSpent.push({ p: project, value });
+    else regularSpent.push({ p: project, value });
+  });
+  return { regularSpent, shortDocSpent };
+}
+
+function formatStatusTitleCase(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw === raw.toUpperCase()) {
+    const normalized = raw.toLowerCase();
+    return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  }
+  return raw;
+}
+
+function ensureFixedNature(items = []) {
+  const normalized = uniq((Array.isArray(items) ? items : []).map((item) => String(item || "").trim()).filter(Boolean));
+  if (!normalized.some((item) => normalizeSearchText(item) === normalizeSearchText(FIXED_NATURE_LABEL))) {
+    normalized.push(FIXED_NATURE_LABEL);
+  }
+  return normalized;
+}
+
+function isProtectedConfigItem(key, label) {
+  if (key !== "natures") return false;
+  return normalizeSearchText(label) === normalizeSearchText(FIXED_NATURE_LABEL);
 }
 
 function getRouteItemsForProject(projectId) {
@@ -2980,15 +3033,13 @@ function renderGanttExtraFilters() {
   const natureValues = uniq([...(state.settings?.natures || []), ...state.projects.map((p) => getProjectField(p, "nature"))]).filter(Boolean);
   const durationValues = uniq([...(state.settings?.durations || []), ...state.projects.map((p) => getProjectField(p, "duration"))]).filter(Boolean);
   const distributionValues = uniq([...(state.settings?.distributions || []), ...state.projects.flatMap((p) => getProjectDistributions(p))]).filter(Boolean);
-  const infantilValues = ["Sim", "Não"];
   sanitizeFilterSet(selectedGanttFilters.statuses, statusValues);
   sanitizeFilterSet(selectedGanttFilters.categories, categoryValues);
   sanitizeFilterSet(selectedGanttFilters.formats, formatValues);
   sanitizeFilterSet(selectedGanttFilters.natures, natureValues);
   sanitizeFilterSet(selectedGanttFilters.durations, durationValues);
-  sanitizeFilterSet(selectedGanttFilters.infantis, infantilValues);
   sanitizeFilterSet(selectedGanttFilters.distributions, distributionValues);
-  sanitizeFilterSet(selectedGanttFilters.flags, PROJECT_FLAG_FIELDS.map((field) => field.key));
+  sanitizeFilterSet(selectedGanttFilters.flags, PROJECT_RECORD_FILTER_FIELDS.map((field) => field.key));
 
   renderDashboardFilterChips(
     document.getElementById("ganttStatusChips"),
@@ -3025,13 +3076,6 @@ function renderGanttExtraFilters() {
     "durations",
     () => renderGantt()
   );
-  renderDashboardFilterChips(
-    document.getElementById("ganttInfantilChips"),
-    infantilValues,
-    selectedGanttFilters.infantis,
-    "infantis",
-    () => renderGantt()
-  );
   renderProjectFlagFilterChips(
     document.getElementById("ganttFlagChips"),
     selectedGanttFilters.flags,
@@ -3055,7 +3099,6 @@ function filteredGanttProjects() {
     if (!matchesMultiFilter(getProjectField(p, "format"), selectedGanttFilters.formats)) return false;
     if (!matchesMultiFilter(getProjectField(p, "nature"), selectedGanttFilters.natures)) return false;
     if (!matchesMultiFilter(getProjectField(p, "duration"), selectedGanttFilters.durations)) return false;
-    if (!matchesMultiFilter(getProjectInfantilValue(p), selectedGanttFilters.infantis)) return false;
     if (!matchesProjectFlagFilters(p, selectedGanttFilters.flags)) return false;
     if (!matchesMultiFilter(getProjectDistributions(p), selectedGanttFilters.distributions)) return false;
     if (!matchesProjectFilter(p.id, selectedGanttFilters.projects)) return false;
@@ -3343,15 +3386,13 @@ function renderProjectsTools() {
   const projectNatureValues = uniq([...state.settings.natures, ...state.projects.map((p) => getProjectField(p, "nature"))]).filter(Boolean);
   const projectDurationValues = uniq([...state.settings.durations, ...state.projects.map((p) => getProjectField(p, "duration"))]).filter(Boolean);
   const projectDistributionValues = uniq([...(state.settings.distributions || []), ...state.projects.flatMap((p) => getProjectDistributions(p))]).filter(Boolean);
-  const projectInfantilValues = ["Sim", "Não"];
   sanitizeFilterSet(selectedProjectFilters.statuses, projectStatusValues);
   sanitizeFilterSet(selectedProjectFilters.categories, projectCategoryValues);
   sanitizeFilterSet(selectedProjectFilters.formats, projectFormatValues);
   sanitizeFilterSet(selectedProjectFilters.natures, projectNatureValues);
   sanitizeFilterSet(selectedProjectFilters.durations, projectDurationValues);
-  sanitizeFilterSet(selectedProjectFilters.infantis, projectInfantilValues);
   sanitizeFilterSet(selectedProjectFilters.distributions, projectDistributionValues);
-  sanitizeFilterSet(selectedProjectFilters.flags, PROJECT_FLAG_FIELDS.map((field) => field.key));
+  sanitizeFilterSet(selectedProjectFilters.flags, PROJECT_RECORD_FILTER_FIELDS.map((field) => field.key));
 
   const years = [...new Set(state.projects.map((p) => getProjectYear(p)).filter((y) => y > 0))].sort((a, b) => a - b);
   const allActive = selectedProjectYears.size === 0;
@@ -3414,16 +3455,6 @@ function renderProjectsTools() {
     }
   );
   renderDashboardFilterChips(
-    document.getElementById("projectInfantilChips"),
-    projectInfantilValues,
-    selectedProjectFilters.infantis,
-    "infantis",
-    () => {
-      renderProjectsTools();
-      renderProjectsTable();
-    }
-  );
-  renderDashboardFilterChips(
     document.getElementById("projectDurationChips"),
     projectDurationValues,
     selectedProjectFilters.durations,
@@ -3470,7 +3501,6 @@ function renderProjectsTable() {
     if (!matchesMultiFilter(getProjectField(p, "format"), selectedProjectFilters.formats)) return false;
     if (!matchesMultiFilter(getProjectField(p, "nature"), selectedProjectFilters.natures)) return false;
     if (!matchesMultiFilter(getProjectField(p, "duration"), selectedProjectFilters.durations)) return false;
-    if (!matchesMultiFilter(getProjectInfantilValue(p), selectedProjectFilters.infantis)) return false;
     if (!matchesProjectFlagFilters(p, selectedProjectFilters.flags)) return false;
     if (!matchesMultiFilter(getProjectDistributions(p), selectedProjectFilters.distributions)) return false;
     if (!matchesProjectFilter(p.id, selectedProjectFilters.projects)) return false;
@@ -3489,7 +3519,7 @@ function renderProjectsTable() {
   const durations = uniq(state.settings.durations).filter(Boolean);
   const statuses = uniq(state.settings.statuses).filter(Boolean);
   const renderFlagCell = (project, fieldKey) => {
-    const checked = Boolean(project[fieldKey]);
+    const checked = fieldKey === "infantil" ? getProjectInfantilValue(project) === "Sim" : Boolean(project[fieldKey]);
     if (!editable) {
       return `<label class="cell-inline-checkbox is-readonly"><input type="checkbox" ${checked ? "checked" : ""} disabled /><span></span></label>`;
     }
@@ -3517,7 +3547,7 @@ function renderProjectsTable() {
         <td>${editable ? inlineSelect("format", p.id, getProjectField(p, "format"), formats) : escapeHtml(getProjectField(p, "format") || "—")}</td>
         <td>${editable ? inlineSelect("nature", p.id, getProjectField(p, "nature"), natures) : escapeHtml(getProjectField(p, "nature") || "—")}</td>
         <td>${editable ? inlineSelect("duration", p.id, getProjectField(p, "duration"), durations) : escapeHtml(getProjectField(p, "duration") || "—")}</td>
-        <td>${editable ? inlineSelect("infantil", p.id, getProjectInfantilValue(p), ["Sim", "Não"]) : escapeHtml(getProjectInfantilValue(p) || "—")}</td>
+        <td>${renderFlagCell(p, "infantil")}</td>
         ${PROJECT_FLAG_FIELDS.map((field) => `<td>${renderFlagCell(p, field.key)}</td>`).join("")}
         <td>${editable ? inlineSelect("status", p.id, getProjectField(p, "status"), statuses, badgeClass) : escapeHtml(getProjectField(p, "status") || "—")}</td>
         <td>
@@ -3559,8 +3589,9 @@ function renderProjectsTable() {
     el.addEventListener("change", () => {
       const project = state.projects.find((p) => p.id === el.dataset.id);
       const field = String(el.dataset.flag || "").trim();
-      if (!project || !PROJECT_FLAG_FIELDS.some((item) => item.key === field)) return;
+      if (!project || !PROJECT_RECORD_FILTER_FIELDS.some((item) => item.key === field)) return;
       project[field] = Boolean(el.checked);
+      if (field === "infantil") project.infantilContent = project[field] ? "Sim" : "";
       saveState();
       renderProjectsTable();
       renderDashboard();
@@ -3891,7 +3922,6 @@ function commitProjectInlineSelect(el) {
     format: "format",
     nature: "nature",
     duration: "duration",
-    infantil: "infantilContent",
     status: "status"
   };
   const projectField = fieldMap[field];
@@ -4114,10 +4144,10 @@ function openProjectDialog(projectId = null) {
   document.getElementById("projectBudget").value = formatCurrencyInputBRL(
     hasNumericValue(project?.budget) ? Number(project.budget) : hasNumericValue(project?.spent) ? Number(project.spent) : null
   );
+  document.getElementById("projectFlagInfantil").checked = getProjectInfantilValue(project) === "Sim";
   document.getElementById("projectFlagCpb").checked = Boolean(project?.cpb);
   document.getElementById("projectFlagCrt").checked = Boolean(project?.crt);
   document.getElementById("projectFlagImdb").checked = Boolean(project?.imdb);
-  document.getElementById("projectInfantilContent").value = getProjectInfantilValue(project);
   const releaseDate = normalizeDateInput(project?.releaseDate || "");
   document.getElementById("projectReleaseDateText").value = releaseDate ? formatDatePtBr(releaseDate) : "";
   document.getElementById("projectReleaseDatePicker").value = releaseDate;
@@ -4184,10 +4214,11 @@ function collectProjectForm() {
     nature: document.getElementById("projectNature").value,
     duration: document.getElementById("projectDuration").value,
     distributions: collectSelectedProjectDistributions(),
+    infantil: document.getElementById("projectFlagInfantil").checked,
     cpb: document.getElementById("projectFlagCpb").checked,
     crt: document.getElementById("projectFlagCrt").checked,
     imdb: document.getElementById("projectFlagImdb").checked,
-    infantilContent: document.getElementById("projectInfantilContent").value,
+    infantilContent: document.getElementById("projectFlagInfantil").checked ? "Sim" : "",
     status: document.getElementById("projectStatus").value,
     budget: parsedBudget,
     releaseDate: normalizedReleaseDate,
@@ -4360,25 +4391,28 @@ function renderConfigList() {
     const arr = state.settings[selectedConfigKey] || [];
     list.innerHTML = arr
       .map(
-        (item, i) => `<li class="config-item" data-config-index="${i}" data-config-id="${i}">
+        (item, i) => {
+          const isProtected = isProtectedConfigItem(selectedConfigKey, item);
+          return `<li class="config-item" data-config-index="${i}" data-config-id="${i}">
       <span class="config-item-main">
-        ${editable ? '<button type="button" class="btn light config-drag-btn" draggable="true" title="Arrastar para ordenar" aria-label="Arrastar para ordenar">⋮⋮</button>' : ""}
+        ${editable && !isProtected ? '<button type="button" class="btn light config-drag-btn" draggable="true" title="Arrastar para ordenar" aria-label="Arrastar para ordenar">⋮⋮</button>' : ""}
         <span class="config-item-label">${escapeHtml(item)}</span>
       </span>
       <span class="actions">
         ${
           editable
             ? `${
-                hasColor
+                hasColor && !isProtected
                   ? `<input class="config-color-input" type="color" value="${getConfigItemColor(selectedConfigKey, item, i)}" data-action="item-color" data-id="${i}" />`
                   : ""
               }
-        <button class="btn light" data-action="edit" data-id="${i}">Editar</button>
-        <button class="btn danger" data-action="del" data-id="${i}">Excluir</button>`
+        ${isProtected ? "" : `<button class="btn light" data-action="edit" data-id="${i}">Editar</button>
+        <button class="btn danger" data-action="del" data-id="${i}">Excluir</button>`}`
             : ""
         }
       </span>
-    </li>`
+    </li>`;
+        }
       )
       .join("");
   }
@@ -4433,6 +4467,10 @@ function addConfigItem() {
     const value = prompt(`Novo ${label}:`);
     if (!value || !value.trim()) return;
     const nextValue = value.trim();
+    if (isProtectedConfigItem(selectedConfigKey, nextValue)) {
+      alert("Esse item é fixo do sistema e já está disponível.");
+      return;
+    }
     state.settings[selectedConfigKey].push(nextValue);
     if (COLOR_CONFIG_KEYS.has(selectedConfigKey)) {
       setConfigItemColor(selectedConfigKey, nextValue, getConfigItemColor(selectedConfigKey, nextValue, state.settings[selectedConfigKey].length - 1));
@@ -4464,6 +4502,10 @@ function deleteConfigItem(id) {
   } else {
     const arr = state.settings[selectedConfigKey];
     const removed = arr[Number(id)];
+    if (isProtectedConfigItem(selectedConfigKey, removed)) {
+      alert("Esse item é fixo do sistema e não pode ser excluído.");
+      return;
+    }
     arr.splice(Number(id), 1);
     if (COLOR_CONFIG_KEYS.has(selectedConfigKey)) {
       deleteConfigItemColor(selectedConfigKey, removed);
@@ -4512,6 +4554,10 @@ function openConfigItemDialog(id) {
     const idx = Number(id);
     const item = state.settings[key]?.[idx];
     if (!item) return;
+    if (isProtectedConfigItem(key, item)) {
+      alert("Esse item é fixo do sistema e não pode ser editado.");
+      return;
+    }
     currentName = item;
     currentColor = getConfigItemColor(key, item, idx);
   }
@@ -4563,6 +4609,7 @@ function saveConfigItemDialog() {
     const idx = Number(id);
     const current = arr[idx];
     if (!current) return;
+    if (isProtectedConfigItem(key, current)) return;
     arr[idx] = nextName;
     if (hasColor) {
       if (current !== nextName) renameConfigItemColor(key, current, nextName, idx);
@@ -4812,7 +4859,7 @@ function buildStateFromBase44Exports(fileMap, fallbackState) {
     categories,
     productionTypes: uniq([...pickName(productionTypeRows), ...projects.map((p) => p.productionType)]),
     formats: uniq([...pickName(formatRows), ...projects.map((p) => p.format)]),
-    natures: uniq([...pickName(natureRows), ...projects.map((p) => p.nature)]),
+    natures: ensureFixedNature(uniq([...pickName(natureRows), ...projects.map((p) => p.nature)])),
     durations: uniq([...pickName(durationRows), ...projects.map((p) => p.duration)]),
     statuses: uniq([...pickName(statusRows), ...projects.map((p) => p.status)]),
     stages: normalizeSettingsStages(stages.length ? stages : fallbackState.settings.stages, fallbackState.settings.stages)
@@ -5067,7 +5114,8 @@ function uniq(values) {
   return [...new Set(values.filter((v) => String(v || "").trim()))];
 }
 
-function renderBarChart(container, map, mode = "vertical", palette = ["#f3ba00"]) {
+function renderBarChart(container, map, mode = "vertical", palette = ["#f3ba00"], valueFormatter = null) {
+  if (!container) return;
   const entries = Object.entries(map);
   if (!entries.length) {
     container.innerHTML = '<div class="empty">Sem dados.</div>';
@@ -5093,10 +5141,11 @@ function renderBarChart(container, map, mode = "vertical", palette = ["#f3ba00"]
 
   container.innerHTML = entries
     .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
-    .map(([label, value], idx) => {
-      const color = palette[idx % palette.length];
-      const height = Math.max((Number(value) / max) * 110, 8);
-      return `<div class="bar-col"><div class="bar" style="height:${height}px; background:${color}"></div><small>${escapeHtml(label)}</small><small>${value}</small></div>`;
+      .map(([label, value], idx) => {
+        const color = palette[idx % palette.length];
+        const height = Math.max((Number(value) / max) * 110, 8);
+      const displayValue = typeof valueFormatter === "function" ? valueFormatter(Number(value), label) : value;
+      return `<div class="bar-col"><div class="bar" style="height:${height}px; background:${color}"></div><small>${escapeHtml(label)}</small><small>${escapeHtml(String(displayValue))}</small></div>`;
     })
     .join("");
 }
@@ -6097,7 +6146,7 @@ function sanitizeUserForState(user) {
   };
 }
 
-function setUserFirstAccessPending(email, pending) {
+function setUserFirstAccessPending(email, pending, role = "") {
   const normalizedEmail = normalizeUserEmail(email);
   if (!normalizedEmail) return;
   const existing = Array.isArray(state.users)
@@ -6112,7 +6161,7 @@ function setUserFirstAccessPending(email, pending) {
     id: normalizedEmail,
     name: displayNameFromEmail(normalizedEmail),
     email: normalizedEmail,
-    role: "LEITOR",
+    role: ["ADMIN", "EDITOR", "LEITOR"].includes(String(role || "").trim().toUpperCase()) ? String(role).trim().toUpperCase() : "LEITOR",
     active: true,
     invitedAt: new Date().toISOString(),
     firstAccessPending: Boolean(pending)
@@ -6343,11 +6392,11 @@ function normalizeProjectForMerge(project) {
     nature: String(project.nature || "").trim(),
     duration: String(project.duration || "").trim(),
     distributions: getProjectDistributions(project),
+    infantil: Boolean(project.infantil) || getProjectInfantilValue(project) === "Sim",
     cpb: Boolean(project.cpb),
     crt: Boolean(project.crt),
     imdb: Boolean(project.imdb),
     infantilContent: getProjectInfantilValue(project),
-    infantil: getProjectInfantilValue(project) === "Sim",
     status: String(project.status || "").trim(),
     budget,
     spent,
@@ -6836,6 +6885,10 @@ function getCurrentAuthEmail() {
   return normalizeUserEmail(supabaseAuthSession?.user?.email || "");
 }
 
+function shouldPersistUsersInAppState() {
+  return !isRemoteSupabaseAuthEnabled();
+}
+
 function canSyncToSupabase() {
   if (isLocalFileRuntime()) return false;
   const client = getSupabaseClient();
@@ -6883,7 +6936,9 @@ async function persistStateToSupabase(stateRaw) {
     const actor = getCurrentUser();
     const auditEntries = buildProjectAuditEntries(baseState?.projects || [], localState?.projects || [], actor);
     payload = mergeConcurrentState(baseState, localState, remoteState || baseState, auditEntries);
-    payload.users = (Array.isArray(localState.users) ? localState.users : []).map(sanitizeUserForState).filter(Boolean);
+    payload.users = shouldPersistUsersInAppState()
+      ? (Array.isArray(localState.users) ? localState.users : []).map(sanitizeUserForState).filter(Boolean)
+      : [];
 
     try {
       await writeSupabaseState(client, payload);
@@ -7069,7 +7124,7 @@ function mergeState(parsed) {
     categories: pickArray(parsed?.settings?.categories, base.settings.categories),
     productionTypes: pickArray(parsed?.settings?.productionTypes, base.settings.productionTypes),
     formats: pickArray(parsed?.settings?.formats, base.settings.formats),
-    natures: pickArray(parsed?.settings?.natures, base.settings.natures),
+    natures: ensureFixedNature(pickArray(parsed?.settings?.natures, base.settings.natures)),
     durations: pickArray(parsed?.settings?.durations, base.settings.durations),
     distributions: pickArray(parsed?.settings?.distributions, base.settings.distributions),
     statuses: pickArray(parsed?.settings?.statuses, base.settings.statuses),
@@ -7088,7 +7143,9 @@ function mergeState(parsed) {
     ? parsed.routes.map(normalizeRouteItemForMerge).filter(Boolean)
     : base.routes;
   const routeProjects = normalizeRouteProjectIds(parsed?.routeProjects || base.routeProjects);
-  const users = Array.isArray(parsed?.users) && parsed.users.length
+  const users = !shouldPersistUsersInAppState()
+    ? []
+    : Array.isArray(parsed?.users) && parsed.users.length
     ? parsed.users
         .filter((user) => user && typeof user === "object")
         .map((user) => ({
@@ -7139,6 +7196,7 @@ function seedState() {
     cloned.settings = cloned.settings || {};
     cloned.settings.stages = normalizeSettingsStages(cloned.settings.stages, []);
     cloned.settings.distributions = pickArray(cloned.settings.distributions, ["Lumine", "Prime"]);
+    cloned.settings.natures = ensureFixedNature(pickArray(cloned.settings.natures, ["Documental", "Ficção", "Animação", FIXED_NATURE_LABEL]));
     cloned.settings.routeStatuses = pickArray(
       cloned.settings.routeStatuses,
       ["BACKLOG", "AGUARDANDO ABERTURA", "EM ANDAMENTO", "SUBMETIDO", "NÃO SUBMETIDO", "SELECIONADO", "NOMEADO", "PREMIADO", "NÃO SELECIONADO", "CONCLUÍDO"]
@@ -7227,7 +7285,7 @@ function seedState() {
       categories: ["Streaming", "Produtora", "Incubado"],
       productionTypes: ["Documentário", "Curta", "Série"],
       formats: ["Obra Não Seriada", "Série"],
-      natures: ["Documental", "Ficção", "Animação"],
+      natures: ensureFixedNature(["Documental", "Ficção", "Animação"]),
       durations: ["Média-metragem", "Curta-metragem", "Longa-metragem"],
       distributions: ["Lumine", "Prime"],
       statuses: ["Em andamento", "Concluído", "Planejamento", "Pausado"],
@@ -7332,6 +7390,7 @@ function stageSeed(stageId, start, end) {
 }
 
 async function bootApp() {
+  state = seedState();
   initTheme();
   try {
     await init();

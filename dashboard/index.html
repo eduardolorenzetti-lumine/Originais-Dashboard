@@ -126,10 +126,6 @@
             <div id="dashboardFlagChips" class="chips"></div>
           </div>
           <div class="filter-row">
-            <strong>Infantil:</strong>
-            <div id="dashboardInfantilChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
             <strong>Distribuição:</strong>
             <div id="dashboardDistributionChips" class="chips"></div>
           </div>
@@ -177,6 +173,11 @@
             <div id="chartByDuration" class="chart-bars"></div>
           </article>
 
+          <article class="panel">
+            <h3>Gasto com Short docs</h3>
+            <div id="chartShortDocsSpent" class="chart-bars"></div>
+          </article>
+
         </div>
       </section>
 
@@ -222,10 +223,6 @@
           <div class="filter-row">
             <strong>Registros:</strong>
             <div id="ganttFlagChips" class="chips"></div>
-          </div>
-          <div class="filter-row">
-            <strong>Infantil:</strong>
-            <div id="ganttInfantilChips" class="chips"></div>
           </div>
           <div class="filter-row">
             <strong>Distribuição:</strong>
@@ -307,10 +304,6 @@
               <div id="projectFlagChips" class="chips"></div>
             </div>
             <div class="filter-row">
-              <strong>Infantil:</strong>
-              <div id="projectInfantilChips" class="chips"></div>
-            </div>
-            <div class="filter-row">
               <strong>Distribuição:</strong>
               <div id="projectDistributionChips" class="chips"></div>
             </div>
@@ -346,7 +339,7 @@
                 <th>Formato</th>
                 <th>Natureza</th>
                 <th>Duração</th>
-                <th>Conteúdo Infantil</th>
+                <th>Infantil</th>
                 <th>CPB</th>
                 <th>CRT</th>
                 <th>IMDb</th>
@@ -502,13 +495,6 @@
         <label>Formato <select id="projectFormat"></select></label>
         <label>Natureza <select id="projectNature"></select></label>
         <label>Duração <select id="projectDuration"></select></label>
-        <label>Conteúdo Infantil
-          <select id="projectInfantilContent">
-            <option value="">Selecione</option>
-            <option value="Sim">Sim</option>
-            <option value="Não">Não</option>
-          </select>
-        </label>
         <label>Status <select id="projectStatus"></select></label>
         <label>Gasto (R$) <input id="projectBudget" type="text" inputmode="decimal" placeholder="R$ 0,00" /></label>
         <label>Lançamento
@@ -521,6 +507,7 @@
           </div>
         </label>
         <div class="project-flags-grid">
+          <label class="checkbox-inline"><input id="projectFlagInfantil" type="checkbox" /> Infantil</label>
           <label class="checkbox-inline"><input id="projectFlagCpb" type="checkbox" /> CPB</label>
           <label class="checkbox-inline"><input id="projectFlagCrt" type="checkbox" /> CRT</label>
           <label class="checkbox-inline"><input id="projectFlagImdb" type="checkbox" /> IMDb</label>
