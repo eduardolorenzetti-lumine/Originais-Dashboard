@@ -1,0 +1,26 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  background-color: #050b1a;
+}
+
+.page {
+  min-height: 100vh;
+  width: 100%;
+  background-image: url("assets/images/carloacutis-desktop.jpeg");
+  background-position: center center;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+
+@media (max-width: 768px) {
+  .page {
+    background-image: url("assets/images/carloacutis-mobile.jpeg");
+  }
+}
