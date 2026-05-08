@@ -6793,7 +6793,6 @@ async function fetchSecureUsersFromSupabase() {
     const { data, error } = await client
       .from(SUPABASE_USERS_TABLE)
       .select("email,name,role,active,invited_at")
-      .eq("active", true)
       .order("name", { ascending: true });
     if (error) throw error;
     return (data || []).map((row) =>
