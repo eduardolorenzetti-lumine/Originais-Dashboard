@@ -148,6 +148,7 @@ let supabaseBaseState = null;
 let lastSupabaseSyncError = "";
 let supabaseAuthSession = null;
 let supabaseAuthListenerBound = false;
+let supabaseInitialSessionHandled = false;
 let secureUsersLoaded = false;
 let supabaseLogoutInProgress = false;
 let remotePasswordPromptInProgress = false;
@@ -508,16 +509,6 @@ function bindGlobalActions() {
     }
     openInviteDialog();
   });
-
-  document.getElementById("btnImportCsv").addEventListener("click", () => {
-    if (!canEditContent()) {
-      alert("Perfil LEITOR possui apenas visualização.");
-      return;
-    }
-    document.getElementById("csvInput").click();
-  });
-
-  document.getElementById("csvInput").addEventListener("change", importCsvFile);
 
   const refreshFromSupabaseOnReturn = async () => {
     if (!isRemoteSupabaseAuthEnabled() || !supabaseAuthSession?.access_token) return;
@@ -1089,8 +1080,16 @@ async function syncCurrentUserFromSupabaseSession({ persistUsers = true } = {}) 
 function bindSupabaseAuthListener() {
   if (supabaseAuthListenerBound || !isRemoteSupabaseAuthEnabled()) return;
   supabaseAuthListenerBound = true;
-  getSupabaseClient().auth.onAuthStateChange(async (_event, session) => {
+  getSupabaseClient().auth.onAuthStateChange(async (event, session) => {
+    if (supabaseLogoutInProgress) return;
     supabaseAuthSession = session || null;
+    // TOKEN_REFRESHED apenas atualiza a referência da sessão, sem re-sincronizar o usuário
+    if (event === "TOKEN_REFRESHED") return;
+    // INITIAL_SESSION é tratado pelo initializeSupabaseAuth para evitar dupla execução
+    if (event === "INITIAL_SESSION") {
+      supabaseInitialSessionHandled = true;
+      return;
+    }
     const signedIn = await syncCurrentUserFromSupabaseSession({ persistUsers: true });
     if (!session || !signedIn) {
       currentUserId = "";
@@ -1280,7 +1279,6 @@ function applyAuthVisibility() {
   const readOnlyControls = [
     "btnNewProject",
     "btnQuickNewProject",
-    "btnImportCsv",
     "btnAddConfig",
     "applyTimeline"
   ];
