@@ -7397,7 +7397,7 @@ async function bootApp() {
     console.error("[Originais] Falha na inicialização da aplicação.", error);
     ensureAuthSurfaceVisible();
     applyAuthVisibility();
-    showLoginError("Não foi possível concluir a inicialização. Tente recarregar a página.");
+    showLoginError(`Erro de inicialização: ${String(error?.message || error).substring(0, 120)}`);
   } finally {
     ensureAuthSurfaceVisible();
   }
