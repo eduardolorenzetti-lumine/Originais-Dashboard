@@ -1,12 +1,42 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Carlo Acutis Jogo</title>
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-  <main class="page" aria-label="Página de abertura do jogo Carlo Acutis"></main>
-</body>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Carlo Acutis: Bicycle of Light</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="frame">
+        <div id="game-shell">
+          <div id="game-root" aria-label="Carlo Acutis browser game"></div>
+          <div class="mobile-controls" id="mobile-controls" aria-hidden="true">
+            <button class="control-button lane-button" id="btn-up" type="button">
+              UP
+            </button>
+            <button class="control-button action-button" id="btn-record" type="button">
+              REC
+            </button>
+            <button class="control-button action-button" id="btn-jump" type="button">
+              JUMP
+            </button>
+            <button class="control-button lane-button" id="btn-down" type="button">
+              DOWN
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="./configuracao.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
+    <script type="module" src="./src/main.js?v=phaser-studio-intro-4"></script>
+  </body>
 </html>
