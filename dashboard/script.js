@@ -1709,14 +1709,21 @@ function bindDialog() {
       );
       try {
         await upsertSecureUserInSupabase(payload);
-        if (payload.password && normalizeUserEmail(payload.email) === normalizeUserEmail(getCurrentAuthEmail())) {
-          const { error } = await getSupabaseClient().auth.updateUser({ password: payload.password });
-          if (error) throw error;
+        if (payload.password) {
+          if (normalizeUserEmail(payload.email) === normalizeUserEmail(getCurrentAuthEmail())) {
+            // Alteração da própria senha
+            const { error } = await getSupabaseClient().auth.updateUser({ password: payload.password });
+            if (error) throw error;
+          } else if (canManageUsers()) {
+            // Admin definindo senha de outro usuário via Edge Function
+            const { error } = await setUserPasswordAsAdmin(payload.email, payload.password);
+            if (error) throw new Error(error.message || String(error));
+          }
         }
         setUserFirstAccessPending(payload.email, Boolean(payload.firstAccessPending), payload.role);
         await refreshSecureUsersFromSupabase({ persist: true });
       } catch (error) {
-        alert("Não foi possível salvar o usuário no Supabase.");
+        alert("Não foi possível salvar o usuário: " + (error?.message || "erro desconhecido"));
         console.warn("[Originais] Falha ao salvar usuário seguro.", error?.message || error);
         return;
       }
@@ -3984,17 +3991,22 @@ function openUserDialog(userId = null) {
   const passwordHint = document.getElementById("userPasswordHint");
   if (isRemoteSupabaseAuthEnabled()) {
     const isOwnProfile = Boolean(user && current && normalizeUserEmail(current.email) === normalizeUserEmail(user.email));
-    if (passwordLabel) passwordLabel.hidden = !isOwnProfile;
-    if (passwordConfirmLabel) passwordConfirmLabel.hidden = !isOwnProfile;
+    const showPasswordFields = isOwnProfile || (isAdmin && Boolean(user));
+    if (passwordLabel) passwordLabel.hidden = !showPasswordFields;
+    if (passwordConfirmLabel) passwordConfirmLabel.hidden = !showPasswordFields;
     // Desabilita os campos ocultos para evitar auto-preenchimento do browser
     // e excluí-los da validação nativa do formulário
-    passwordInput.disabled = !isOwnProfile;
-    passwordConfirmInput.disabled = !isOwnProfile;
+    passwordInput.disabled = !showPasswordFields;
+    passwordConfirmInput.disabled = !showPasswordFields;
     if (passwordHint) {
       passwordHint.hidden = false;
-      passwordHint.textContent = isOwnProfile
-        ? "Preencha os campos de acesso apenas se quiser alterar sua senha."
-        : 'O usuário definirá a própria senha no botão "Primeiro acesso".';
+      if (isOwnProfile) {
+        passwordHint.textContent = "Preencha os campos de acesso apenas se quiser alterar sua senha.";
+      } else if (showPasswordFields) {
+        passwordHint.textContent = "Defina uma nova senha para este usuário (opcional). Deixe em branco para manter a senha atual.";
+      } else {
+        passwordHint.textContent = 'O usuário definirá a própria senha no botão "Primeiro acesso".';
+      }
     }
   } else {
     if (passwordLabel) passwordLabel.hidden = false;
@@ -4058,7 +4070,8 @@ function collectUserForm() {
       active: true,
       invitedAt: existing?.invitedAt || new Date().toISOString(),
       password: password || "",
-      firstAccessPending: existing ? Boolean(existing.firstAccessPending) : !Boolean(password)
+      // Se admin definiu uma senha, o usuário não precisa mais fazer "Primeiro acesso"
+      firstAccessPending: existing ? (password ? false : Boolean(existing.firstAccessPending)) : !Boolean(password)
     };
   }
   if ((!existing || !existing.passwordHash) && !password) {
@@ -6868,6 +6881,21 @@ async function upsertSecureUserInSupabase(user) {
   const { error } = await client.from(SUPABASE_USERS_TABLE).upsert(payload, { onConflict: "email" });
   if (error) throw error;
   return sanitized;
+}
+
+async function setUserPasswordAsAdmin(targetEmail, password) {
+  const client = getSupabaseClient();
+  if (!client?.functions) return { error: new Error("Supabase Functions indisponível.") };
+  try {
+    const { data, error } = await client.functions.invoke("set-user-password", {
+      body: { targetEmail, password }
+    });
+    if (error) return { error };
+    if (data?.error) return { error: new Error(data.error) };
+    return { data };
+  } catch (err) {
+    return { error: err };
+  }
 }
 
 async function deleteSecureUserFromSupabase(email) {
