@@ -151,6 +151,7 @@ let supabaseAuthListenerBound = false;
 let supabaseInitialSessionHandled = false;
 let secureUsersLoaded = false;
 let supabaseLogoutInProgress = false;
+let supabaseAuthReady = false; // true após initializeSupabaseAuth concluir
 let remotePasswordPromptInProgress = false;
 let currentThemePreference = "system";
 let systemThemeMediaQuery = null;
@@ -1126,18 +1127,21 @@ async function initializeSupabaseAuth() {
   const { data, error } = await getSupabaseClient().auth.getSession();
   if (error) {
     console.warn("[Originais] Falha ao obter sessão do Supabase.", error.message || error);
+    supabaseAuthReady = true;
     setLoginProcessingState(false);
     applyAuthVisibility();
     return;
   }
   supabaseAuthSession = data.session || null;
   if (!supabaseAuthSession) {
+    supabaseAuthReady = true;
     setLoginProcessingState(false);
     applyAuthVisibility();
     return;
   }
   const signedIn = await syncCurrentUserFromSupabaseSession({ persistUsers: true });
   if (!signedIn) {
+    supabaseAuthReady = true;
     setLoginProcessingState(false);
     applyAuthVisibility();
     return;
@@ -1154,6 +1158,7 @@ async function initializeSupabaseAuth() {
   } else if (callbackMode === "magiclink") {
     await promptRemotePasswordSetup({ contextLabel: "definir sua senha para os próximos acessos", required: true });
   }
+  supabaseAuthReady = true;
   setLoginProcessingState(false);
 }
 
@@ -1266,6 +1271,15 @@ function applyAuthVisibility() {
   const isAdmin = canManageUsers();
   const canEdit = canEditContent();
   const canSeeUsers = canViewUsers();
+
+  // Enquanto o Supabase Auth ainda não confirmou a sessão, mantém ambas as telas
+  // ocultas para evitar o flash da tela de login no refresh da página
+  const authStillPending = isRemoteSupabaseAuthEnabled() && !supabaseAuthReady && !user;
+  if (authStillPending) {
+    loginView.hidden = true;
+    appShell.hidden = true;
+    return;
+  }
 
   loginView.hidden = Boolean(user) && !pendingAuth;
   appShell.hidden = !user || pendingAuth;
