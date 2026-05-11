@@ -6884,17 +6884,25 @@ async function upsertSecureUserInSupabase(user) {
 }
 
 async function setUserPasswordAsAdmin(targetEmail, password) {
-  const client = getSupabaseClient();
-  if (!client?.functions) return { error: new Error("Supabase Functions indisponível.") };
+  const { url, anonKey } = getSupabaseConfig();
+  const accessToken = supabaseAuthSession?.access_token;
+  if (!url || !accessToken) return { error: new Error("Sessão não encontrada. Faça login novamente.") };
+  const functionUrl = `${url.replace(/\/+$/, "")}/functions/v1/set-user-password`;
   try {
-    const { data, error } = await client.functions.invoke("set-user-password", {
-      body: { targetEmail, password }
+    const response = await fetch(functionUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${accessToken}`,
+        "apikey": anonKey
+      },
+      body: JSON.stringify({ targetEmail, password })
     });
-    if (error) return { error };
-    if (data?.error) return { error: new Error(data.error) };
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data?.error) return { error: new Error(data?.error || `Erro HTTP ${response.status}`) };
     return { data };
   } catch (err) {
-    return { error: err };
+    return { error: err instanceof Error ? err : new Error(String(err)) };
   }
 }
 
