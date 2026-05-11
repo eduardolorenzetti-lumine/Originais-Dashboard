@@ -3975,15 +3975,21 @@ function openUserDialog(userId = null) {
   roleSelect.disabled = !isAdmin;
   const roleLabel = roleSelect.closest("label");
   if (roleLabel) roleLabel.hidden = !isAdmin;
-  const passwordLabel = document.getElementById("userPassword").closest("label");
-  const passwordConfirmLabel = document.getElementById("userPasswordConfirm").closest("label");
-  document.getElementById("userPassword").value = "";
-  document.getElementById("userPasswordConfirm").value = "";
+  const passwordInput = document.getElementById("userPassword");
+  const passwordConfirmInput = document.getElementById("userPasswordConfirm");
+  const passwordLabel = passwordInput.closest("label");
+  const passwordConfirmLabel = passwordConfirmInput.closest("label");
+  passwordInput.value = "";
+  passwordConfirmInput.value = "";
   const passwordHint = document.getElementById("userPasswordHint");
   if (isRemoteSupabaseAuthEnabled()) {
     const isOwnProfile = Boolean(user && current && normalizeUserEmail(current.email) === normalizeUserEmail(user.email));
     if (passwordLabel) passwordLabel.hidden = !isOwnProfile;
     if (passwordConfirmLabel) passwordConfirmLabel.hidden = !isOwnProfile;
+    // Desabilita os campos ocultos para evitar auto-preenchimento do browser
+    // e excluí-los da validação nativa do formulário
+    passwordInput.disabled = !isOwnProfile;
+    passwordConfirmInput.disabled = !isOwnProfile;
     if (passwordHint) {
       passwordHint.hidden = false;
       passwordHint.textContent = isOwnProfile
@@ -3993,6 +3999,8 @@ function openUserDialog(userId = null) {
   } else {
     if (passwordLabel) passwordLabel.hidden = false;
     if (passwordConfirmLabel) passwordConfirmLabel.hidden = false;
+    passwordInput.disabled = false;
+    passwordConfirmInput.disabled = false;
     if (passwordHint) {
       passwordHint.hidden = !user;
       passwordHint.textContent = "Deixe os campos de senha em branco para manter a senha atual.";
