@@ -9,6 +9,22 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+
+  <!-- Splash screen exibido enquanto o Supabase Auth inicializa -->
+  <div id="authLoadingScreen" class="auth-loading-screen">
+    <div class="auth-loading-brand">
+      <div class="logo-mark" aria-hidden="true">
+        <span class="logo-l">L</span>
+        <span class="logo-point"></span>
+      </div>
+      <div>
+        <strong>ORIGINAIS</strong>
+        <small>LUMINE</small>
+      </div>
+    </div>
+    <div class="auth-loading-spinner" aria-label="Carregando..."></div>
+  </div>
+
   <section id="loginView" class="login-view" hidden>
     <div class="login-card">
       <a href="#" class="login-brand brand-link" data-go-home>

@@ -1273,13 +1273,16 @@ function applyAuthVisibility() {
   const canSeeUsers = canViewUsers();
 
   // Enquanto o Supabase Auth ainda não confirmou a sessão, mantém ambas as telas
-  // ocultas para evitar o flash da tela de login no refresh da página
+  // ocultas e exibe o splash screen para evitar o flash da tela de login no refresh
   const authStillPending = isRemoteSupabaseAuthEnabled() && !supabaseAuthReady && !user;
+  const splash = document.getElementById("authLoadingScreen");
   if (authStillPending) {
     loginView.hidden = true;
     appShell.hidden = true;
+    if (splash) splash.classList.remove("hidden");
     return;
   }
+  if (splash) splash.classList.add("hidden");
 
   loginView.hidden = Boolean(user) && !pendingAuth;
   appShell.hidden = !user || pendingAuth;
