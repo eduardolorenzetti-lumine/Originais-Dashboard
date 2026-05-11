@@ -3850,6 +3850,7 @@ function renderUsers() {
 
   body.innerHTML = users
     .map((user) => {
+      const isInactive = user.active === false;
       const invitedAt = user.invitedAt ? formatDatePtBr(user.invitedAt) : "";
       const inviteText = invitedAt ? `Convidado em ${invitedAt}` : "Sem convite";
       const passwordState = isRemoteSupabaseAuthEnabled()
@@ -3859,10 +3860,10 @@ function renderUsers() {
           : user.passwordHash
             ? "Definida"
             : "Pendente";
-      return `<tr>
-        <td>${escapeHtml(user.name || "")}</td>
+      return `<tr${isInactive ? ' style="opacity:0.5"' : ''}>
+        <td>${escapeHtml(user.name || "")}${isInactive ? ' <span style="font-size:0.75em;color:#94a3b8;font-weight:500">(inativo)</span>' : ""}</td>
         <td>${escapeHtml(user.email || "")}</td>
-        <td><span class="badge blue">${escapeHtml(user.role || "LEITOR")}</span></td>
+        <td><span class="badge ${isInactive ? "grey" : "blue"}">${escapeHtml(user.role || "LEITOR")}</span></td>
         <td>${escapeHtml(passwordState)}</td>
         <td>${escapeHtml(inviteText)}</td>
         <td>
@@ -3977,6 +3978,8 @@ function openUserDialog(userId = null) {
   const userEmailInput = document.getElementById("userEmail");
   userEmailInput.value = user?.email || "";
   userEmailInput.readOnly = Boolean(isRemoteSupabaseAuthEnabled() && user);
+  // Impede o browser de interpretar o form como tela de login e oferecer salvar senha
+  userEmailInput.autocomplete = "off";
   const roleSelect = document.getElementById("userRole");
   roleSelect.value = user?.role || "LEITOR";
   roleSelect.disabled = !isAdmin;
@@ -6888,6 +6891,7 @@ async function setUserPasswordAsAdmin(targetEmail, password) {
   const accessToken = supabaseAuthSession?.access_token;
   if (!url || !accessToken) return { error: new Error("Sessão não encontrada. Faça login novamente.") };
   const functionUrl = `${url.replace(/\/+$/, "")}/functions/v1/set-user-password`;
+  console.info("[Originais] Chamando Edge Function:", functionUrl);
   try {
     const response = await fetch(functionUrl, {
       method: "POST",
@@ -6898,10 +6902,16 @@ async function setUserPasswordAsAdmin(targetEmail, password) {
       },
       body: JSON.stringify({ targetEmail, password })
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || data?.error) return { error: new Error(data?.error || `Erro HTTP ${response.status}`) };
+    const text = await response.text().catch(() => "");
+    let data = {};
+    try { data = JSON.parse(text); } catch (_) {}
+    console.info("[Originais] Edge Function resposta:", response.status, text.slice(0, 300));
+    if (!response.ok || data?.error) {
+      return { error: new Error(data?.error || data?.message || `Erro HTTP ${response.status}: ${text.slice(0, 100)}`) };
+    }
     return { data };
   } catch (err) {
+    console.error("[Originais] Edge Function fetch falhou:", err);
     return { error: err instanceof Error ? err : new Error(String(err)) };
   }
 }
@@ -6911,7 +6921,7 @@ async function deleteSecureUserFromSupabase(email) {
   if (!client?.auth || typeof client.from !== "function") throw new Error("Supabase Auth indisponível.");
   const normalizedEmail = normalizeUserEmail(email);
   if (!normalizedEmail) return;
-  const { error } = await client.from(SUPABASE_USERS_TABLE).update({ active: false }).eq("email", normalizedEmail);
+  const { error } = await client.from(SUPABASE_USERS_TABLE).delete().eq("email", normalizedEmail);
   if (error) throw error;
 }
 
