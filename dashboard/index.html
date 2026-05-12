@@ -496,7 +496,10 @@
 
   <dialog id="projectDialog">
     <form id="projectForm" method="dialog">
-      <h2 id="dialogTitle">Novo Projeto</h2>
+      <div class="project-dialog-header">
+        <h2 id="dialogTitle">Novo Projeto</h2>
+        <label class="project-shortdoc-badge"><input id="projectFlagShortDoc" type="checkbox" /> Short Doc</label>
+      </div>
       <input type="hidden" id="projectId" />
 
       <div class="form-grid">
@@ -519,7 +522,6 @@
           </div>
         </label>
         <div class="project-flags-grid">
-          <label class="checkbox-inline"><input id="projectFlagShortDoc" type="checkbox" /> Short Doc</label>
           <label class="checkbox-inline"><input id="projectFlagInfantil" type="checkbox" /> Infantil</label>
           <label class="checkbox-inline"><input id="projectFlagCpb" type="checkbox" /> CPB</label>
           <label class="checkbox-inline"><input id="projectFlagCrt" type="checkbox" /> CRT</label>
