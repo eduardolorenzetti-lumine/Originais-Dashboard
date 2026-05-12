@@ -169,7 +169,6 @@ const FIELD_TO_SETTINGS_KEY = {
   status: "statuses"
 };
 const FIXED_NATURE_LABEL = "Short doc";
-const FIXED_FORMAT_LABEL = "Short Doc";
 const PROJECT_FLAG_FIELDS = [
   { key: "cpb", label: "CPB" },
   { key: "crt", label: "CRT" },
@@ -2359,7 +2358,7 @@ function getProjectInfantilValue(project) {
 function isShortDocProject(project) {
   const code = String(project?.code || "").trim();
   if (/^03-/.test(code)) return true;
-  return normalizeSearchText(getProjectField(project, "format")) === normalizeSearchText(FIXED_FORMAT_LABEL);
+  return normalizeSearchText(getProjectField(project, "nature")) === normalizeSearchText(FIXED_NATURE_LABEL);
 }
 
 function getDashboardSpentCollections(projects = []) {
@@ -2392,18 +2391,9 @@ function ensureFixedNature(items = []) {
   return normalized;
 }
 
-function ensureFixedFormat(items = []) {
-  const normalized = uniq((Array.isArray(items) ? items : []).map((item) => String(item || "").trim()).filter(Boolean));
-  if (!normalized.some((item) => normalizeSearchText(item) === normalizeSearchText(FIXED_FORMAT_LABEL))) {
-    normalized.push(FIXED_FORMAT_LABEL);
-  }
-  return normalized;
-}
-
 function isProtectedConfigItem(key, label) {
-  if (key === "natures") return normalizeSearchText(label) === normalizeSearchText(FIXED_NATURE_LABEL);
-  if (key === "formats") return normalizeSearchText(label) === normalizeSearchText(FIXED_FORMAT_LABEL);
-  return false;
+  if (key !== "natures") return false;
+  return normalizeSearchText(label) === normalizeSearchText(FIXED_NATURE_LABEL);
 }
 
 function getRouteItemsForProject(projectId) {
@@ -4206,11 +4196,11 @@ function openProjectDialog(projectId = null) {
     hasNumericValue(project?.budget) ? Number(project.budget) : hasNumericValue(project?.spent) ? Number(project.spent) : null
   );
 
-  // Evento: mudança no Formato atualiza SKU automaticamente para novos projetos
-  const formatSelect = document.getElementById("projectFormat");
-  formatSelect.onchange = () => {
+  // Evento: mudança na Natureza atualiza SKU automaticamente para novos projetos
+  const natureSelect = document.getElementById("projectNature");
+  natureSelect.onchange = () => {
     if (!isNewProject) return;
-    const isSD = normalizeSearchText(formatSelect.value) === normalizeSearchText(FIXED_FORMAT_LABEL);
+    const isSD = normalizeSearchText(natureSelect.value) === normalizeSearchText(FIXED_NATURE_LABEL);
     document.getElementById("projectCode").value = nextCode(isSD ? "03" : "02");
   };
 
@@ -4928,7 +4918,7 @@ function buildStateFromBase44Exports(fileMap, fallbackState) {
   const settings = {
     categories,
     productionTypes: uniq([...pickName(productionTypeRows), ...projects.map((p) => p.productionType)]),
-    formats: ensureFixedFormat(uniq([...pickName(formatRows), ...projects.map((p) => p.format)])),
+    formats: uniq([...pickName(formatRows), ...projects.map((p) => p.format)]),
     natures: ensureFixedNature(uniq([...pickName(natureRows), ...projects.map((p) => p.nature)])),
     durations: uniq([...pickName(durationRows), ...projects.map((p) => p.duration)]),
     statuses: uniq([...pickName(statusRows), ...projects.map((p) => p.status)]),
@@ -7223,7 +7213,7 @@ function mergeState(parsed) {
   const mergedSettings = {
     categories: pickArray(parsed?.settings?.categories, base.settings.categories),
     productionTypes: pickArray(parsed?.settings?.productionTypes, base.settings.productionTypes),
-    formats: ensureFixedFormat(pickArray(parsed?.settings?.formats, base.settings.formats)),
+    formats: pickArray(parsed?.settings?.formats, base.settings.formats),
     natures: ensureFixedNature(pickArray(parsed?.settings?.natures, base.settings.natures)),
     durations: pickArray(parsed?.settings?.durations, base.settings.durations),
     distributions: pickArray(parsed?.settings?.distributions, base.settings.distributions),
@@ -7384,7 +7374,7 @@ function seedState() {
     settings: {
       categories: ["Streaming", "Produtora", "Incubado"],
       productionTypes: ["Documentário", "Curta", "Série"],
-      formats: ensureFixedFormat(["Obra Não Seriada", "Série"]),
+      formats: ["Obra Não Seriada", "Série"],
       natures: ensureFixedNature(["Documental", "Ficção", "Animação"]),
       durations: ["Média-metragem", "Curta-metragem", "Longa-metragem"],
       distributions: ["Lumine", "Prime"],
