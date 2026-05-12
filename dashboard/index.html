@@ -496,18 +496,15 @@
 
   <dialog id="projectDialog">
     <form id="projectForm" method="dialog">
-      <div class="project-dialog-header">
-        <h2 id="dialogTitle">Novo Projeto</h2>
-        <label class="project-shortdoc-badge"><input id="projectFlagShortDoc" type="checkbox" /> Short Doc</label>
-      </div>
+      <h2 id="dialogTitle">Novo Projeto</h2>
       <input type="hidden" id="projectId" />
 
       <div class="form-grid">
         <label>SKU <input id="projectCode" required readonly /></label>
         <label>Título <input id="projectTitle" required /></label>
+        <label>Formato <select id="projectFormat"></select></label>
         <label>Ano <input id="projectYear" type="number" min="1900" max="2100" /></label>
         <label>Categoria <select id="projectCategory"></select></label>
-        <label>Formato <select id="projectFormat"></select></label>
         <label>Natureza <select id="projectNature"></select></label>
         <label>Duração <select id="projectDuration"></select></label>
         <label>Status <select id="projectStatus"></select></label>

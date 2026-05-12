@@ -4196,7 +4196,9 @@ function openProjectDialog(projectId = null) {
 
   document.getElementById("projectId").value = project?.id || uid();
   const isNewProject = !project;
-  const isShortDoc = project ? /^03-/.test(String(project.code || "").trim()) : false;
+  const isShortDoc = project
+    ? /^03-/.test(String(project.code || "").trim())
+    : false;
   document.getElementById("projectCode").value = project?.code || nextCode(isShortDoc ? "03" : "02");
   document.getElementById("projectTitle").value = project?.title || "";
   document.getElementById("projectYear").value = project?.year || "";
@@ -4204,37 +4206,12 @@ function openProjectDialog(projectId = null) {
     hasNumericValue(project?.budget) ? Number(project.budget) : hasNumericValue(project?.spent) ? Number(project.spent) : null
   );
 
-  const shortDocEl = document.getElementById("projectFlagShortDoc");
-  shortDocEl.checked = isShortDoc;
-
-  // Se é Short Doc, forçar formato correspondente no select
-  if (isShortDoc) {
-    const formatSelect = document.getElementById("projectFormat");
-    const shortDocOpt = Array.from(formatSelect.options).find(
-      (o) => normalizeSearchText(o.value) === normalizeSearchText(FIXED_FORMAT_LABEL)
-    );
-    if (shortDocOpt) formatSelect.value = shortDocOpt.value;
-  }
-
-  // Evento: checkbox Short Doc atualiza SKU (novo projeto) e formato
-  shortDocEl.onchange = () => {
-    const checked = shortDocEl.checked;
-    const formatSelect = document.getElementById("projectFormat");
-    if (checked) {
-      if (isNewProject) document.getElementById("projectCode").value = nextCode("03");
-      const shortDocOpt = Array.from(formatSelect.options).find(
-        (o) => normalizeSearchText(o.value) === normalizeSearchText(FIXED_FORMAT_LABEL)
-      );
-      if (shortDocOpt) formatSelect.value = shortDocOpt.value;
-    } else {
-      if (isNewProject) document.getElementById("projectCode").value = nextCode("02");
-      if (normalizeSearchText(formatSelect.value) === normalizeSearchText(FIXED_FORMAT_LABEL)) {
-        const firstOther = Array.from(formatSelect.options).find(
-          (o) => normalizeSearchText(o.value) !== normalizeSearchText(FIXED_FORMAT_LABEL)
-        );
-        if (firstOther) formatSelect.value = firstOther.value;
-      }
-    }
+  // Evento: mudança no Formato atualiza SKU automaticamente para novos projetos
+  const formatSelect = document.getElementById("projectFormat");
+  formatSelect.onchange = () => {
+    if (!isNewProject) return;
+    const isSD = normalizeSearchText(formatSelect.value) === normalizeSearchText(FIXED_FORMAT_LABEL);
+    document.getElementById("projectCode").value = nextCode(isSD ? "03" : "02");
   };
 
   document.getElementById("projectFlagInfantil").checked = getProjectInfantilValue(project) === "Sim";
@@ -4307,7 +4284,6 @@ function collectProjectForm() {
     nature: document.getElementById("projectNature").value,
     duration: document.getElementById("projectDuration").value,
     distributions: collectSelectedProjectDistributions(),
-    shortDoc: document.getElementById("projectFlagShortDoc").checked,
     infantil: document.getElementById("projectFlagInfantil").checked,
     cpb: document.getElementById("projectFlagCpb").checked,
     crt: document.getElementById("projectFlagCrt").checked,
