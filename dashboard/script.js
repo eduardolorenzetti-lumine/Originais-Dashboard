@@ -1751,6 +1751,12 @@ function bindDialog() {
       saveState();
     }
 
+    // Limpar campos de senha antes de fechar para evitar prompt "Salvar Senha?" do browser
+    const pwdField = document.getElementById("userPassword");
+    const pwdConfirmField = document.getElementById("userPasswordConfirm");
+    if (pwdField) pwdField.value = "";
+    if (pwdConfirmField) pwdConfirmField.value = "";
+
     userDialog.close();
     renderUsers();
     applyAuthVisibility();
