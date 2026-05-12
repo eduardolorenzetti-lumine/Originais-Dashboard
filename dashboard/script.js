@@ -169,6 +169,7 @@ const FIELD_TO_SETTINGS_KEY = {
   status: "statuses"
 };
 const FIXED_NATURE_LABEL = "Short doc";
+const FIXED_FORMAT_LABEL = "Short Doc";
 const PROJECT_FLAG_FIELDS = [
   { key: "cpb", label: "CPB" },
   { key: "crt", label: "CRT" },
@@ -2356,7 +2357,9 @@ function getProjectInfantilValue(project) {
 }
 
 function isShortDocProject(project) {
-  return normalizeSearchText(getProjectField(project, "nature")) === normalizeSearchText(FIXED_NATURE_LABEL);
+  const code = String(project?.code || "").trim();
+  if (/^03-/.test(code)) return true;
+  return normalizeSearchText(getProjectField(project, "format")) === normalizeSearchText(FIXED_FORMAT_LABEL);
 }
 
 function getDashboardSpentCollections(projects = []) {
@@ -2389,9 +2392,18 @@ function ensureFixedNature(items = []) {
   return normalized;
 }
 
+function ensureFixedFormat(items = []) {
+  const normalized = uniq((Array.isArray(items) ? items : []).map((item) => String(item || "").trim()).filter(Boolean));
+  if (!normalized.some((item) => normalizeSearchText(item) === normalizeSearchText(FIXED_FORMAT_LABEL))) {
+    normalized.push(FIXED_FORMAT_LABEL);
+  }
+  return normalized;
+}
+
 function isProtectedConfigItem(key, label) {
-  if (key !== "natures") return false;
-  return normalizeSearchText(label) === normalizeSearchText(FIXED_NATURE_LABEL);
+  if (key === "natures") return normalizeSearchText(label) === normalizeSearchText(FIXED_NATURE_LABEL);
+  if (key === "formats") return normalizeSearchText(label) === normalizeSearchText(FIXED_FORMAT_LABEL);
+  return false;
 }
 
 function getRouteItemsForProject(projectId) {
@@ -4183,12 +4195,48 @@ function openProjectDialog(projectId = null) {
   document.getElementById("btnDeleteProject").style.visibility = project ? "visible" : "hidden";
 
   document.getElementById("projectId").value = project?.id || uid();
-  document.getElementById("projectCode").value = project?.code || nextCode();
+  const isNewProject = !project;
+  const isShortDoc = project ? /^03-/.test(String(project.code || "").trim()) : false;
+  document.getElementById("projectCode").value = project?.code || nextCode(isShortDoc ? "03" : "02");
   document.getElementById("projectTitle").value = project?.title || "";
   document.getElementById("projectYear").value = project?.year || "";
   document.getElementById("projectBudget").value = formatCurrencyInputBRL(
     hasNumericValue(project?.budget) ? Number(project.budget) : hasNumericValue(project?.spent) ? Number(project.spent) : null
   );
+
+  const shortDocEl = document.getElementById("projectFlagShortDoc");
+  shortDocEl.checked = isShortDoc;
+
+  // Se é Short Doc, forçar formato correspondente no select
+  if (isShortDoc) {
+    const formatSelect = document.getElementById("projectFormat");
+    const shortDocOpt = Array.from(formatSelect.options).find(
+      (o) => normalizeSearchText(o.value) === normalizeSearchText(FIXED_FORMAT_LABEL)
+    );
+    if (shortDocOpt) formatSelect.value = shortDocOpt.value;
+  }
+
+  // Evento: checkbox Short Doc atualiza SKU (novo projeto) e formato
+  shortDocEl.onchange = () => {
+    const checked = shortDocEl.checked;
+    const formatSelect = document.getElementById("projectFormat");
+    if (checked) {
+      if (isNewProject) document.getElementById("projectCode").value = nextCode("03");
+      const shortDocOpt = Array.from(formatSelect.options).find(
+        (o) => normalizeSearchText(o.value) === normalizeSearchText(FIXED_FORMAT_LABEL)
+      );
+      if (shortDocOpt) formatSelect.value = shortDocOpt.value;
+    } else {
+      if (isNewProject) document.getElementById("projectCode").value = nextCode("02");
+      if (normalizeSearchText(formatSelect.value) === normalizeSearchText(FIXED_FORMAT_LABEL)) {
+        const firstOther = Array.from(formatSelect.options).find(
+          (o) => normalizeSearchText(o.value) !== normalizeSearchText(FIXED_FORMAT_LABEL)
+        );
+        if (firstOther) formatSelect.value = firstOther.value;
+      }
+    }
+  };
+
   document.getElementById("projectFlagInfantil").checked = getProjectInfantilValue(project) === "Sim";
   document.getElementById("projectFlagCpb").checked = Boolean(project?.cpb);
   document.getElementById("projectFlagCrt").checked = Boolean(project?.crt);
@@ -4259,6 +4307,7 @@ function collectProjectForm() {
     nature: document.getElementById("projectNature").value,
     duration: document.getElementById("projectDuration").value,
     distributions: collectSelectedProjectDistributions(),
+    shortDoc: document.getElementById("projectFlagShortDoc").checked,
     infantil: document.getElementById("projectFlagInfantil").checked,
     cpb: document.getElementById("projectFlagCpb").checked,
     crt: document.getElementById("projectFlagCrt").checked,
@@ -4903,7 +4952,7 @@ function buildStateFromBase44Exports(fileMap, fallbackState) {
   const settings = {
     categories,
     productionTypes: uniq([...pickName(productionTypeRows), ...projects.map((p) => p.productionType)]),
-    formats: uniq([...pickName(formatRows), ...projects.map((p) => p.format)]),
+    formats: ensureFixedFormat(uniq([...pickName(formatRows), ...projects.map((p) => p.format)])),
     natures: ensureFixedNature(uniq([...pickName(natureRows), ...projects.map((p) => p.nature)])),
     durations: uniq([...pickName(durationRows), ...projects.map((p) => p.duration)]),
     statuses: uniq([...pickName(statusRows), ...projects.map((p) => p.status)]),
@@ -6100,16 +6149,17 @@ async function hydrateStateFromIndexedDb(currentState) {
   return candidate;
 }
 
-function nextCode() {
+function nextCode(prefix = "02") {
   const skus = state.projects.map((p) => String(p.code || "").trim()).filter(Boolean);
-  const matched = skus.map((sku) => sku.match(/^(\d+)-(\d+)$/)).filter(Boolean);
-  if (matched.length) {
-    const prefix = matched[0][1];
-    const next = Math.max(...matched.map((m) => Number(m[2]) || 0)) + 1;
-    return `${prefix}-${String(next).padStart(2, "0")}`;
-  }
-  const n = skus.length + 1;
-  return `02-${String(n).padStart(2, "0")}`;
+  const used = new Set(
+    skus
+      .map((sku) => sku.match(/^(\d+)-(\d+)$/))
+      .filter((m) => m && m[1] === prefix)
+      .map((m) => Number(m[2]))
+  );
+  let n = 1;
+  while (used.has(n)) n++;
+  return `${prefix}-${String(n).padStart(2, "0")}`;
 }
 
 function uid() {
@@ -7197,7 +7247,7 @@ function mergeState(parsed) {
   const mergedSettings = {
     categories: pickArray(parsed?.settings?.categories, base.settings.categories),
     productionTypes: pickArray(parsed?.settings?.productionTypes, base.settings.productionTypes),
-    formats: pickArray(parsed?.settings?.formats, base.settings.formats),
+    formats: ensureFixedFormat(pickArray(parsed?.settings?.formats, base.settings.formats)),
     natures: ensureFixedNature(pickArray(parsed?.settings?.natures, base.settings.natures)),
     durations: pickArray(parsed?.settings?.durations, base.settings.durations),
     distributions: pickArray(parsed?.settings?.distributions, base.settings.distributions),
@@ -7358,7 +7408,7 @@ function seedState() {
     settings: {
       categories: ["Streaming", "Produtora", "Incubado"],
       productionTypes: ["Documentário", "Curta", "Série"],
-      formats: ["Obra Não Seriada", "Série"],
+      formats: ensureFixedFormat(["Obra Não Seriada", "Série"]),
       natures: ensureFixedNature(["Documental", "Ficção", "Animação"]),
       durations: ["Média-metragem", "Curta-metragem", "Longa-metragem"],
       distributions: ["Lumine", "Prime"],

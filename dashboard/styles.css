@@ -2259,6 +2259,13 @@ dialog::backdrop {
   margin-top: 16px;
 }
 
+#projectCode[readonly] {
+  background: var(--surface-2);
+  color: var(--text-2);
+  cursor: default;
+  user-select: none;
+}
+
 #projectForm > .panel {
   margin-top: 18px;
   background: var(--surface-2);

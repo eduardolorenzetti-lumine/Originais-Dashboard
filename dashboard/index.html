@@ -500,7 +500,7 @@
       <input type="hidden" id="projectId" />
 
       <div class="form-grid">
-        <label>SKU <input id="projectCode" required /></label>
+        <label>SKU <input id="projectCode" required readonly /></label>
         <label>Título <input id="projectTitle" required /></label>
         <label>Ano <input id="projectYear" type="number" min="1900" max="2100" /></label>
         <label>Categoria <select id="projectCategory"></select></label>
@@ -519,6 +519,7 @@
           </div>
         </label>
         <div class="project-flags-grid">
+          <label class="checkbox-inline"><input id="projectFlagShortDoc" type="checkbox" /> Short Doc</label>
           <label class="checkbox-inline"><input id="projectFlagInfantil" type="checkbox" /> Infantil</label>
           <label class="checkbox-inline"><input id="projectFlagCpb" type="checkbox" /> CPB</label>
           <label class="checkbox-inline"><input id="projectFlagCrt" type="checkbox" /> CRT</label>
